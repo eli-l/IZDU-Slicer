@@ -26,9 +26,10 @@ async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
     for (i, image) in images.iter().enumerate() {
         let mut buf = BufWriter::new(Cursor::new(Vec::new()));
         let mut compressed = Cursor::new(Vec::new());
-        image.write_to(&mut compressed, ImageFormat::Png).unwrap();
+        image.write_to(&mut compressed, ImageFormat::Png).unwrap().to_owned();
         buf.write_all(&compressed.into_inner()).unwrap();
-        // Debug
+
+        // Debug message
         let wr = buf.get_mut();
         let pos = wr.stream_position().expect("failed to seek");
         let size = pos;

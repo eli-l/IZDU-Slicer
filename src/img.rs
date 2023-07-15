@@ -25,19 +25,18 @@ pub mod image_processor {
 
     pub async fn slice_image(url: &str) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
         let u = url.to_string();
-        let img = get_image(u).await.unwrap();
-        let single_img_size = calculate_image_dimensions(&img);
+        let img = download_image(u).await.unwrap();
+        let single_img_size = get_single_image_dimensions(&img);
         slice_images_view(img, single_img_size)
     }
 
+    // Use Subview to split image, more clean code, seems to be a bit faster
     #[allow(dead_code)]
     fn slice_images_view(img: DynamicImage, new_img_size: Dimension) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
-        let mut images = prepare_output(new_img_size.width, new_img_size.height);
-
+        let mut images = initialize_output(new_img_size.width, new_img_size.height);
         for pic in 0..4 {
             let x = (pic % 2) * new_img_size.width;
             let y = (pic / 2 ) * new_img_size.height;
-
             let cur_image = img.view(
                 x,
                 y,
@@ -45,8 +44,7 @@ pub mod image_processor {
                 new_img_size.height
             ).to_image();
 
-
-            //Debug statement below
+            //Uncoment below for debug (dump buff to file)
             // cur_image.clone().save(format!("{}.png", pic)).unwrap();
             images[pic as usize] = cur_image;
         }
@@ -54,9 +52,11 @@ pub mod image_processor {
         images
     }
 
+    // Split image by copying pixels one by one - initial approach.
+    // Might be usable in future to alter some pixels while copying (watermaking?)
     #[allow(dead_code)]
     fn slice_images_copy_px(img: DynamicImage, new_img_size: Dimension) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
-        let mut images = prepare_output(new_img_size.width, new_img_size.height);
+        let mut images = initialize_output(new_img_size.width, new_img_size.height);
 
         for pic in 0..4 {
             // let mut new_img = ImageBuffer::new(img_size.width, img_size.height);
@@ -76,18 +76,18 @@ pub mod image_processor {
         images
     }
 
-    fn prepare_output(w: u32, h: u32) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
-        let images: [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] = [
+    
+    fn initialize_output(w: u32, h: u32) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
+        [
             ImageBuffer::new(w, h),
             ImageBuffer::new(w, h),
             ImageBuffer::new(w, h),
             ImageBuffer::new(w, h),
-        ];
-        images
+        ]
     }
 
 
-    async fn get_image(url: String) -> Result<DynamicImage, ImageFetchingError> {
+    async fn download_image(url: String) -> Result<DynamicImage, ImageFetchingError> {
         let response = reqwest::get(&url).await;
         let img_bytes = response.unwrap().bytes().await;
 
@@ -106,20 +106,12 @@ pub mod image_processor {
         }
     }
 
-    fn calculate_image_dimensions(img: &DynamicImage) -> Dimension {
+    fn get_single_image_dimensions(img: &DynamicImage) -> Dimension {
         let h = img.height() / 2;
         let w = img.width() / 2;
         Dimension {
             height: h,
             width: w,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn debug_size(w:f64, h: f64) {
-        let bytes_per_pixel = image::ColorType::Rgb8.bytes_per_pixel() as f64;
-        let size_in_bytes = (w * h) * bytes_per_pixel;
-        let size_in_mb = size_in_bytes / 1024.0 / 1024.0;
-        println!("Image size: {} MB", size_in_mb);
     }
 }
