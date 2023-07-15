@@ -1,44 +1,57 @@
-mod img;
+mod image_slicer;
 
-use actix_web::{post, HttpServer, HttpResponse, App, web, error};
-use std::io::{BufWriter, Cursor, SeekFrom, Seek, Write};
-use image::ImageFormat;
+use actix_web::{error, post, web, App, HttpResponse, HttpServer};
 use futures::stream::unfold;
+use image::ImageFormat;
 use serde::Deserialize;
-
-#[allow(dead_code)]
-struct AppState {
-    app_name: String,
-}
+use std::env;
+use std::io::{BufWriter, Cursor};
 
 #[derive(Deserialize)]
 struct ImageUrlPayload {
     image_url: String,
 }
 
+#[derive(Deserialize)]
+struct RequestQuery {
+    scale: Option<u32>,
+}
 
 #[post("/")]
-async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
-    let images = img::image_processor::slice_image(&payload.image_url)
-        .await;
+async fn index(
+    payload: web::Json<ImageUrlPayload>,
+    query: web::Query<RequestQuery>,
+) -> HttpResponse {
+    let scale = match &query.scale {
+        Some(val) => *val,
+        None => {
+            println!("Missing scale, using default 0");
+            0
+        }
+    };
 
-    let mut resp_buf: Vec<Vec<u8>> = Vec::new();
-    for (i, image) in images.iter().enumerate() {
+    let images = image_slicer::process(&payload.image_url, scale).await;
+
+    let images = match images {
+        Ok(images) => images,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().finish();
+        }
+    };
+
+    let response_images = images.into_iter().map(|img| {
         let mut buf = BufWriter::new(Cursor::new(Vec::new()));
-        let mut compressed = Cursor::new(Vec::new());
-        image.write_to(&mut compressed, ImageFormat::Png).unwrap();
-        buf.write_all(&compressed.into_inner()).unwrap();
-        // Debug
-        let wr = buf.get_mut();
-        let pos = wr.seek(SeekFrom::Current(0)).expect("failed to seek");
-        let size = pos;
-        println!("Image {} size: {:.2} MB", i+1, size as f64 / 1024.0 / 1024.0);
-        resp_buf.push(buf.into_inner().unwrap().into_inner());
-    }
+        let written = img.write_to(&mut buf, ImageFormat::Png);
+        if written.is_err() {
+            return None;
+        }
+        Some(buf.into_inner())
+    });
 
-    let stream = unfold(resp_buf.into_iter(), |mut iter| async move {
-        iter.next().map(|x| {
-            let bytes = actix_web::web::Bytes::from(x);
+    let stream = unfold(response_images, |mut iter| async move {
+        iter.next().flatten().transpose().ok().flatten().map(|x| {
+            let bytes = actix_web::web::Bytes::from(x.into_inner());
             (Ok::<_, error::Error>(bytes), iter)
         })
     });
@@ -49,17 +62,24 @@ async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
         .streaming(stream)
 }
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(||{
-        App::new()
-            .app_data(web::Data::new(AppState {
-                app_name: String::from("Actix Webs")
-            }))
-            .service(index)
-    })
-    .bind(("0.0.0.0", 9090))?
-    .run()
-    .await
+    println!("Running");
+
+    let port_str = match env::var("PORT") {
+        Ok(val) => val,
+        Err(_) => {
+            println!("PORT not set, using default 9090");
+            String::from("9090")
+        }
+    };
+
+    let port = port_str.trim().parse().unwrap();
+
+    let server = HttpServer::new(|| App::new().service(index))
+        .bind(("0.0.0.0", port))?
+        .run()
+        .await;
+
+    server
 }
