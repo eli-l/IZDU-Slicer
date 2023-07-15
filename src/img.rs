@@ -35,8 +35,8 @@ pub mod image_processor {
         let mut images = prepare_output(new_img_size.width, new_img_size.height);
 
         for pic in 0..4 {
-            let x = 0 + (pic % 2) * new_img_size.width;
-            let y = 0 + (pic / 2 ) * new_img_size.height;
+            let x = (pic % 2) * new_img_size.width;
+            let y = (pic / 2 ) * new_img_size.height;
 
             let cur_image = img.view(
                 x,
@@ -118,7 +118,7 @@ pub mod image_processor {
     #[allow(dead_code)]
     pub fn debug_size(w:f64, h: f64) {
         let bytes_per_pixel = image::ColorType::Rgb8.bytes_per_pixel() as f64;
-        let size_in_bytes = (w * h) as f64 * bytes_per_pixel;
+        let size_in_bytes = (w * h) * bytes_per_pixel;
         let size_in_mb = size_in_bytes / 1024.0 / 1024.0;
         println!("Image size: {} MB", size_in_mb);
     }

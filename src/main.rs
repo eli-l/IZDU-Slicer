@@ -1,7 +1,7 @@
 mod img;
 
 use actix_web::{post, HttpServer, HttpResponse, App, web, error};
-use std::io::{BufWriter, Cursor, SeekFrom, Seek, Write};
+use std::io::{BufWriter, Cursor, Seek, Write};
 use image::ImageFormat;
 use futures::stream::unfold;
 use serde::Deserialize;
@@ -30,7 +30,7 @@ async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
         buf.write_all(&compressed.into_inner()).unwrap();
         // Debug
         let wr = buf.get_mut();
-        let pos = wr.seek(SeekFrom::Current(0)).expect("failed to seek");
+        let pos = wr.stream_position().expect("failed to seek");
         let size = pos;
         println!("Image {} size: {:.2} MB", i+1, size as f64 / 1024.0 / 1024.0);
         resp_buf.push(buf.into_inner().unwrap().into_inner());
@@ -52,7 +52,9 @@ async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(||{
+    println!("Running");
+
+    let server = HttpServer::new(||{
         App::new()
             .app_data(web::Data::new(AppState {
                 app_name: String::from("Actix Webs")
@@ -61,5 +63,7 @@ async fn main() -> std::io::Result<()> {
     })
     .bind(("0.0.0.0", 9090))?
     .run()
-    .await
+    .await;
+
+    server
 }
