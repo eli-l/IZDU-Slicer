@@ -1,10 +1,10 @@
 mod img;
 
-use actix_web::{post, HttpServer, HttpResponse, App, web, error};
-use std::io::{BufWriter, Cursor, Seek, Write};
-use image::ImageFormat;
+use actix_web::{error, post, web, App, HttpResponse, HttpServer};
 use futures::stream::unfold;
+use image::{EncodableLayout, ImageFormat};
 use serde::Deserialize;
+use std::io::{BufWriter, Cursor, Seek, Write};
 
 #[allow(dead_code)]
 struct AppState {
@@ -16,30 +16,25 @@ struct ImageUrlPayload {
     image_url: String,
 }
 
-
+// Probably look into how to handle errors with actix-web. So you could have something like Result<HttpResponse, Error> and then the error gets handled by actix-web and returned to the user.
+// It's been a few years since I worked with actix web so I don't remember the exact details on how to do that.
+// That way you can get rid of the `unwrap()` in the fnction body.
 #[post("/")]
 async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
-    let images = img::image_processor::slice_image(&payload.image_url)
-        .await;
+    let images = img::image_processor::slice_image(&payload.image_url).await;
 
-    let mut resp_buf: Vec<Vec<u8>> = Vec::new();
-    for (i, image) in images.iter().enumerate() {
+    let response_images = images.into_iter().map(|img| {
         let mut buf = BufWriter::new(Cursor::new(Vec::new()));
-        let mut compressed = Cursor::new(Vec::new());
-        image.write_to(&mut compressed, ImageFormat::Png).unwrap().to_owned();
-        buf.write_all(&compressed.into_inner()).unwrap();
+        let written = img.write_to(&mut buf, ImageFormat::Png);
+        if written.is_err() {
+            return None;
+        };
+        Some(buf.into_inner())
+    });
 
-        // Debug message
-        let wr = buf.get_mut();
-        let pos = wr.stream_position().expect("failed to seek");
-        let size = pos;
-        println!("Image {} size: {:.2} MB", i+1, size as f64 / 1024.0 / 1024.0);
-        resp_buf.push(buf.into_inner().unwrap().into_inner());
-    }
-
-    let stream = unfold(resp_buf.into_iter(), |mut iter| async move {
-        iter.next().map(|x| {
-            let bytes = actix_web::web::Bytes::from(x);
+    let stream = unfold(response_images, |mut iter| async move {
+        iter.next().flatten().transpose().ok().flatten().map(|x| {
+            let bytes = actix_web::web::Bytes::from(x.into_inner());
             (Ok::<_, error::Error>(bytes), iter)
         })
     });
@@ -50,15 +45,18 @@ async fn index(payload: web::Json<ImageUrlPayload>) -> HttpResponse {
         .streaming(stream)
 }
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Running");
 
-    let server = HttpServer::new(||{
+    // Take a look at the `tracing` crate and `tracing-subscriber` crate.
+    // It's a really nice way to get logs from your application.
+    // Then you can drop the ugly println!() statements.
+
+    let server = HttpServer::new(|| {
         App::new()
             .app_data(web::Data::new(AppState {
-                app_name: String::from("Actix Webs")
+                app_name: String::from("Actix Webs"),
             }))
             .service(index)
     })
