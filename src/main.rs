@@ -13,15 +13,19 @@ struct ImageUrlPayload {
 }
 
 #[derive(Deserialize)]
-struct RequestQuery {
+struct SliceQuery {
     scale: Option<u32>,
 }
 
+#[derive(Deserialize)]
+struct WatermarkQuery {
+    image_url: String,
+    text: Option<String>,
+    transparency: Option<i32>,
+}
+
 #[post("/slice")]
-async fn slice(
-    payload: web::Json<ImageUrlPayload>,
-    query: web::Query<RequestQuery>,
-) -> HttpResponse {
+async fn slice(payload: web::Json<ImageUrlPayload>, query: web::Query<SliceQuery>) -> HttpResponse {
     let scale = match &query.scale {
         Some(val) => *val,
         None => {
@@ -62,6 +66,30 @@ async fn slice(
         .streaming(stream)
 }
 
+#[post("/watermark")]
+async fn watermark(query: web::Query<WatermarkQuery>) -> HttpResponse {
+    let wm_text = match &query.text {
+        Some(val) => val,
+        None => "watermark",
+    };
+
+    let alpha = match &query.transparency {
+        Some(val) => *val as f32 / 100.0,
+        None => 0.5,
+    };
+
+    let img = query.image_url.to_string();
+
+    HttpResponse::Ok().content_type("application/text").body(
+        "Request, image: ".to_owned()
+            + &img
+            + ", text: "
+            + wm_text
+            + ", transparency: "
+            + &alpha.to_string(),
+    )
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Running");
@@ -76,7 +104,7 @@ async fn main() -> std::io::Result<()> {
 
     let port = port_str.trim().parse().unwrap();
 
-    let server = HttpServer::new(|| App::new().service(slice))
+    let server = HttpServer::new(|| App::new().service(slice).service(watermark))
         .bind(("0.0.0.0", port))?
         .run()
         .await;

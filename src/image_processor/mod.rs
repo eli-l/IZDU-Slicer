@@ -1,7 +1,7 @@
+use crate::image_processor::watermark::create_watermark;
 use anyhow::{Error, Result};
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 use reqwest;
-use rusttype::{Font, Scale};
 
 pub mod watermark;
 
@@ -48,50 +48,14 @@ fn slice_images_view(
     output.iter_mut().enumerate().for_each(|(pic, new_img)| {
         let x = (pic as u32 % 2) * new_img_size.width;
         let y = (pic as u32 / 2) * new_img_size.height;
-        let view = img.view(x, y, new_img_size.width, new_img_size.height);
+        let image = img.view(x, y, new_img_size.width, new_img_size.height);
 
-        let font_data = include_bytes!("../../resources/OpenSans-Regular.ttf");
-        let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
         let text = "github.com/eli-l/IZDU-Slicer";
-        let scale = Scale::uniform(24.0);
-        let wm_ready = DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text)).resize(
-            view.width(),
-            view.height(),
-            image::imageops::FilterType::Nearest,
-        );
 
-        *new_img = watermark::add_watermark(view.to_image(), wm_ready, 0.5)
+        let wm_image = create_watermark(text, (image.width(), image.height()));
+        *new_img = watermark::add_watermark(image.to_image(), wm_image, 0.5)
     });
     output
-}
-
-fn render_text_to_image(font: &Font, scale: Scale, text: &str) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let v_metrics = font.v_metrics(scale);
-    let glyphs: Vec<_> = font
-        .layout(text, scale, rusttype::point(0.0, v_metrics.ascent))
-        .collect();
-
-    let glyphs_height = v_metrics.ascent - v_metrics.descent;
-    let glyphs_width = glyphs
-        .iter()
-        .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-        .fold(0.0 as f32, |a, b| a.max(b))
-        .ceil() as u32;
-
-    let mut image = ImageBuffer::new(glyphs_width, glyphs_height as u32);
-
-    for glyph in glyphs {
-        if let Some(bounding_box) = glyph.pixel_bounding_box() {
-            glyph.draw(|x, y, v| {
-                let x = x as i32 + bounding_box.min.x;
-                let y = y as i32 + bounding_box.min.y;
-                let v = (v * 255.0) as u8;
-                image.put_pixel(x as u32, y as u32, Rgba([v, v, v, v]));
-            });
-        }
-    }
-
-    image
 }
 
 // Split image by copying pixels one by one - initial approach.
