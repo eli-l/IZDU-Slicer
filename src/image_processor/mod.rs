@@ -3,6 +3,8 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 use reqwest;
 use rusttype::{Font, Scale};
 
+pub mod watermark;
+
 #[derive(Debug)]
 struct Dimension {
     height: u32,
@@ -48,17 +50,17 @@ fn slice_images_view(
         let y = (pic as u32 / 2) * new_img_size.height;
         let view = img.view(x, y, new_img_size.width, new_img_size.height);
 
-        let font_data = include_bytes!("../resources/OpenSans-Regular.ttf");
+        let font_data = include_bytes!("../../resources/OpenSans-Regular.ttf");
         let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
         let text = "github.com/eli-l/IZDU-Slicer";
         let scale = Scale::uniform(24.0);
         let wm_ready = DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text)).resize(
-            600,
-            300,
+            view.width(),
+            view.height(),
             image::imageops::FilterType::Nearest,
         );
 
-        *new_img = add_watermark(view.to_image(), wm_ready, 0.8)
+        *new_img = watermark::add_watermark(view.to_image(), wm_ready, 0.5)
     });
     output
 }
@@ -90,39 +92,6 @@ fn render_text_to_image(font: &Font, scale: Scale, text: &str) -> ImageBuffer<Rg
     }
 
     image
-}
-
-fn add_watermark(
-    mut img: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    watermark: DynamicImage,
-    alpha: f32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let (w, h) = (watermark.width(), watermark.height());
-    let (iw, ih) = (img.width(), img.height());
-    let x = (iw - w) / 2;
-    let y = (ih - h) / 2;
-
-    for i in 0..w {
-        for j in 0..h {
-            let wm = watermark.get_pixel(i, j);
-            let image = *img.get_pixel(x + i, y + j);
-
-            // let alpha1 = image[3] as f32 / 255.0;
-            // let alpha2 = wm[3] as f32 / 255.0;
-            let alpha2 = f32::max(alpha, 0.5);
-            let alpha1 = 1.0 - alpha2;
-            let alpha = alpha1 + alpha2 * (1.0 - alpha1);
-            let px = image::Rgba([
-                ((alpha1 * image[0] as f32) + (alpha2 * wm[0] as f32 * (1.0 - alpha1))) as u8,
-                ((alpha1 * image[1] as f32) + (alpha2 * wm[1] as f32 * (1.0 - alpha1))) as u8,
-                ((alpha1 * image[2] as f32) + (alpha2 * wm[2] as f32 * (1.0 - alpha1))) as u8,
-                (alpha * 255.0) as u8,
-            ]);
-            img.put_pixel(x + i, y + j, px);
-        }
-    }
-    // image::imageops::overlay(&mut img, &watermark, x as i64, y as i64);
-    img
 }
 
 // Split image by copying pixels one by one - initial approach.

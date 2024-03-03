@@ -1,4 +1,4 @@
-mod image_slicer;
+mod image_processor;
 
 use actix_web::{error, post, web, App, HttpResponse, HttpServer};
 use futures::stream::unfold;
@@ -17,8 +17,8 @@ struct RequestQuery {
     scale: Option<u32>,
 }
 
-#[post("/")]
-async fn index(
+#[post("/slice")]
+async fn slice(
     payload: web::Json<ImageUrlPayload>,
     query: web::Query<RequestQuery>,
 ) -> HttpResponse {
@@ -30,7 +30,7 @@ async fn index(
         }
     };
 
-    let images = image_slicer::process(&payload.image_url, scale).await;
+    let images = image_processor::process(&payload.image_url, scale).await;
 
     let images = match images {
         Ok(images) => images,
@@ -76,7 +76,7 @@ async fn main() -> std::io::Result<()> {
 
     let port = port_str.trim().parse().unwrap();
 
-    let server = HttpServer::new(|| App::new().service(index))
+    let server = HttpServer::new(|| App::new().service(slice))
         .bind(("0.0.0.0", port))?
         .run()
         .await;
