@@ -1,7 +1,9 @@
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 use rusttype::{Font, Scale};
 
-pub fn create_watermark(text: &str, size: (u32, u32)) -> DynamicImage {
+pub type Watermark = DynamicImage;
+
+pub fn create_watermark(text: &str, size: (u32, u32)) -> Watermark {
     let font_data = include_bytes!("../../resources/OpenSans-Regular.ttf");
     let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
 
@@ -45,7 +47,7 @@ fn render_text_to_image(font: &Font, scale: Scale, text: &str) -> ImageBuffer<Rg
 
 pub fn add_watermark(
     mut img: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    watermark: DynamicImage,
+    watermark: &Watermark,
     alpha: f32,
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let (w, h) = (watermark.width(), watermark.height());

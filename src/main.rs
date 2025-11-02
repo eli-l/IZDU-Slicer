@@ -1,46 +1,66 @@
 mod image_processor;
 
-use actix_web::{error, post, web, App, HttpResponse, HttpServer};
+use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures::stream::unfold;
 use image::ImageFormat;
 use serde::Deserialize;
 use std::env;
 use std::io::{BufWriter, Cursor};
+use crate::image_processor::get_source;
 
 #[derive(Deserialize)]
-struct ImageUrlPayload {
-    image_url: String,
+struct ImagePayload {
+    image_url: Option<String>,
+    image_base64: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct SliceQuery {
     scale: Option<u32>,
+    watermark: Option<String>,
+    transparency: Option<u16>,
 }
 
 #[derive(Deserialize)]
 struct WatermarkQuery {
-    image_url: String,
     text: Option<String>,
     transparency: Option<i32>,
 }
 
 #[post("/slice")]
-async fn slice(payload: web::Json<ImageUrlPayload>, query: web::Query<SliceQuery>) -> HttpResponse {
-    let scale = match &query.scale {
-        Some(val) => *val,
-        None => {
-            println!("Missing scale, using default 0");
-            0
+async fn slice(
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<SliceQuery>,
+) -> HttpResponse {
+    let scale = query.scale.unwrap_or(300);
+
+    let source = match get_source(req, body).await {
+        Ok(src) => src,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
         }
     };
 
-    let images = image_processor::slice(&payload.image_url, scale).await;
+    let images = match query.watermark.as_ref() {
+        Some(wm) => {
+            image_processor::slice_with_watermark_text(
+                source,
+                scale,
+                wm,
+                query.transparency.unwrap_or(30),
+            )
+            .await
+        }
+        None => image_processor::slice(source, scale).await,
+    };
 
     let images = match images {
         Ok(images) => images,
         Err(e) => {
             println!("Error: {}", e);
-            return HttpResponse::BadRequest().finish();
+            return HttpResponse::BadRequest().body(format!("Error processing image: {}", e));
         }
     };
 
@@ -67,22 +87,30 @@ async fn slice(payload: web::Json<ImageUrlPayload>, query: web::Query<SliceQuery
 }
 
 #[post("/watermark")]
-async fn watermark(query: web::Query<WatermarkQuery>) -> HttpResponse {
+async fn watermark(
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<WatermarkQuery>) -> HttpResponse {
     let wm_text = match &query.text {
         Some(val) => val,
-        None => "watermark",
+        None => "IZDU-Slicer",
     };
 
     let alpha = match &query.transparency {
         Some(val) => *val as f32 / 100.0,
-        None => 0.5,
+        None => 0.3,
     };
 
-    let img = query.image_url.to_string();
+   match get_source(req, body).await {
+        Ok(img) => img,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+        }
+    };
 
     HttpResponse::Ok().content_type("application/text").body(
         "Request, image: ".to_owned()
-            + &img
             + ", text: "
             + wm_text
             + ", transparency: "
@@ -101,7 +129,10 @@ async fn main() -> std::io::Result<()> {
 
     let port = port_str.trim().parse().unwrap();
 
-    let server = HttpServer::new(|| App::new().service(slice).service(watermark))
+    let server = HttpServer::new(|| App::new()
+            .service(watermark)
+            .service(slice)
+        )
         .bind(("0.0.0.0", port))?
         .run()
         .await;
