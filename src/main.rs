@@ -88,8 +88,8 @@ async fn slice(
 
 #[post("/watermark")]
 async fn watermark(
-    req: HttpRequest,
-    body: web::Bytes,
+    // req: HttpRequest,
+    // body: web::Bytes,
     query: web::Query<WatermarkQuery> ) -> HttpResponse {
     let wm_text = match &query.text {
         Some(val) => val,
