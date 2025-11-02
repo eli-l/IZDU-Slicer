@@ -94,13 +94,10 @@ async fn watermark(query: web::Query<WatermarkQuery>) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     println!("Running");
 
-    let port_str = match env::var("PORT") {
-        Ok(val) => val,
-        Err(_) => {
-            println!("PORT not set, using default 9090");
-            String::from("9090")
-        }
-    };
+    let port_str = env::var("PORT").unwrap_or_else(|_| {
+        println!("PORT not set, using default 9090");
+        String::from("9090")
+    });
 
     let port = port_str.trim().parse().unwrap();
 
