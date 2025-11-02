@@ -111,11 +111,7 @@ async fn watermark(
    //  };
 
     HttpResponse::Ok().content_type("text/plain").body(
-        "Request, image: ".to_owned()
-            + ", text: "
-            + wm_text
-            + ", transparency: "
-            + &alpha.to_string(),
+        format!("Request, image: , text: {}, transparency: {}", wm_text, alpha)
     )
 }
 
