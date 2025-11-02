@@ -24,7 +24,7 @@ struct SliceQuery {
 #[derive(Deserialize)]
 struct WatermarkQuery {
     text: Option<String>,
-    transparency: Option<i32>,
+    transparency: Option<u16>,
 }
 
 #[post("/slice")]
