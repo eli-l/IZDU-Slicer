@@ -1,6 +1,6 @@
 [package]
 name = "image_split"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,4 +11,8 @@ futures = "0.3"
 image = "0.24.6"
 reqwest = "0.11.18"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 anyhow = "1.0.71"
+imageproc = "0.23.0"
+rusttype = "0.9.3"
+base64 = "0.21"

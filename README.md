@@ -10,7 +10,12 @@ Splits an image into 4 separate images of the same size, each dimension of origi
 
 ## Usage
 
-#### Runninng
+### API changed in v0.2.0 (November 2025)
+Now it has 2 endpoints:
+- `/slice?scale=300&watermark=my_watermark&transparency=30` (instead of old `/`)
+- `/watermark`
+
+#### Running
 Runs on port :9090 by default. Set env variable `PORT` to change it.
 
 
