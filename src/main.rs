@@ -34,7 +34,7 @@ async fn slice(payload: web::Json<ImageUrlPayload>, query: web::Query<SliceQuery
         }
     };
 
-    let images = image_processor::process(&payload.image_url, scale).await;
+    let images = image_processor::slice(&payload.image_url, scale).await;
 
     let images = match images {
         Ok(images) => images,
