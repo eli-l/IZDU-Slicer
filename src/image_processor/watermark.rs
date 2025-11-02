@@ -27,7 +27,7 @@ fn render_text_to_image(font: &Font, scale: Scale, text: &str) -> ImageBuffer<Rg
     let glyphs_width = glyphs
         .iter()
         .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-        .fold(0.0 as f32, |a, b| a.max(b))
+        .fold(0.0_f32, |a, b| a.max(b))
         .ceil() as u32;
 
     let mut image = ImageBuffer::new(glyphs_width, glyphs_height as u32);
