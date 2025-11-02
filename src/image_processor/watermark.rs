@@ -59,7 +59,7 @@ pub fn add_watermark(
         for j in 0..h {
             let wm = watermark.get_pixel(i, j);
             let image = *img.get_pixel(x + i, y + j);
-            let alpha2 = f32::max(alpha, 0.5);
+            let alpha2 = f32::min(alpha, 0.1);
             let alpha1 = 1.0 - alpha2;
             let alpha = alpha1 + alpha2 * (1.0 - alpha1);
             let px = image::Rgba([

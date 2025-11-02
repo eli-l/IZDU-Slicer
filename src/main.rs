@@ -90,7 +90,7 @@ async fn slice(
 async fn watermark(
     req: HttpRequest,
     body: web::Bytes,
-    query: web::Query<WatermarkQuery>) -> HttpResponse {
+    query: web::Query<WatermarkQuery> ) -> HttpResponse {
     let wm_text = match &query.text {
         Some(val) => val,
         None => "IZDU-Slicer",
@@ -101,15 +101,16 @@ async fn watermark(
         None => 0.3,
     };
 
-   match get_source(req, body).await {
-        Ok(img) => img,
-        Err(e) => {
-            println!("Error: {}", e);
-            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
-        }
-    };
+    // TODO: add logic
+   // match get_source(req, body).await {
+   //      Ok(img) => img,
+   //      Err(e) => {
+   //          println!("Error: {}", e);
+   //          return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+   //      }
+   //  };
 
-    HttpResponse::Ok().content_type("application/text").body(
+    HttpResponse::Ok().content_type("text/plain").body(
         "Request, image: ".to_owned()
             + ", text: "
             + wm_text
