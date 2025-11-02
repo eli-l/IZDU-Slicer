@@ -90,6 +90,14 @@ fn initialize_output(w: u32, h: u32) -> [ImageBuffer<Rgba<u8>, Vec<u8>>; 4] {
 
 async fn download_image(url: String) -> Result<DynamicImage> {
     let response = reqwest::get(&url).await?;
+
+    if !response.status().is_success() {
+        return Err(Error::msg(format!(
+            "Failed to download image: {}. Status: {}",
+            &url, response.status()
+        )));
+    }
+
     let img_bytes = response.bytes().await?;
     println!("Got image {}", &url);
     let size = img_bytes.len() * std::mem::size_of::<u8>();
