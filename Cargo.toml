@@ -3,16 +3,21 @@ name = "image_split"
 version = "0.2.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 actix-web="4"
 futures = "0.3"
 image = "0.24.6"
-reqwest = "0.11.18"
+reqwest = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0.71"
-imageproc = "0.23.0"
-rusttype = "0.9.3"
+anyhow = "1.0"
+imageproc = "0.23"
+rusttype = "0.9"
 base64 = "0.21"
+bytes = "1"
+actix-service = "2"
+
+[dev-dependencies]
+actix-rt = "2"
+actix-service = "2"
+tokio = { version = "1", features = ["full"] }

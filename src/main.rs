@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 mod image_processor;
 
 use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer};
@@ -114,7 +117,7 @@ async fn watermark(
 }
 
 #[post("/resize")]
-async fn resize_handler(
+pub async fn resize_handler(
     req: HttpRequest,
     body: web::Bytes,
     query: web::Query<ResizeQuery>,
@@ -129,9 +132,7 @@ async fn resize_handler(
 
     let ar = query.aspect_ratio.as_deref().unwrap_or("preserve");
 
-    let resized = image_processor::resize_image(source, query.width, query.height, ar).await;
-
-    let img = match resized {
+    let img = match image_processor::resize_image(source, query.width, query.height, ar).await {
         Ok(img) => img,
         Err(e) => {
             println!("Error: {}", e);
@@ -139,13 +140,23 @@ async fn resize_handler(
         }
     };
 
+    // Encode to PNG bytes
     let mut buf = BufWriter::new(Cursor::new(Vec::new()));
-    if let Err(e) = img.write_to(&mut buf, ImageFormat::Png) {
-        return HttpResponse::InternalServerError().body(format!("Error encoding image: {}", e));
+    if img.write_to(&mut buf, ImageFormat::Png).is_err() {
+        return HttpResponse::InternalServerError()
+            .body("Error encoding image");
     }
-    let bytes = buf.into_inner().unwrap().into_inner();
+    let cursor = match BufWriter::into_inner(buf) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .body("Error finalizing image");
+        }
+    };
+    let bytes = cursor.into_inner();
+
     HttpResponse::Ok()
-        .content_type("application/octet-stream")
+        .content_type("image/png")
         .body(bytes)
 }
 
