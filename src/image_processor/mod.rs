@@ -111,6 +111,17 @@ pub async fn slice_with_watermark(
     Ok(sliced)
 }
 
+#[allow(dead_code)]
+pub async fn resize_image(
+    source: ImageSource,
+    width: Option<u32>,
+    height: Option<u32>,
+    aspect_ratio: &str,
+) -> Result<DynamicImage> {
+    let img = load_image(source).await?;
+    Ok(image_slicer::resize_single(img, width, height, aspect_ratio))
+}
+
 pub async fn load_image(source: ImageSource) -> Result<DynamicImage> {
     match source {
         ImageSource::Url(url) => download_image(url).await,

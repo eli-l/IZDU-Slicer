@@ -27,6 +27,13 @@ struct WatermarkQuery {
     transparency: Option<u16>,
 }
 
+#[derive(Deserialize)]
+struct ResizeQuery {
+    width: Option<u32>,
+    height: Option<u32>,
+    aspect_ratio: Option<String>,
+}
+
 #[post("/slice")]
 async fn slice(
     req: HttpRequest,
@@ -88,9 +95,8 @@ async fn slice(
 
 #[post("/watermark")]
 async fn watermark(
-    // req: HttpRequest,
-    // body: web::Bytes,
-    query: web::Query<WatermarkQuery> ) -> HttpResponse {
+    query: web::Query<WatermarkQuery>,
+) -> HttpResponse {
     let wm_text = match &query.text {
         Some(val) => val,
         None => "IZDU-Slicer",
@@ -101,18 +107,46 @@ async fn watermark(
         None => 0.3,
     };
 
-    // TODO: add logic
-   // match get_source(req, body).await {
-   //      Ok(img) => img,
-   //      Err(e) => {
-   //          println!("Error: {}", e);
-   //          return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
-   //      }
-   //  };
+    HttpResponse::Ok().content_type("text/plain").body(format!(
+        "Request, image: , text: {}, transparency: {}",
+        wm_text, alpha
+    ))
+}
 
-    HttpResponse::Ok().content_type("text/plain").body(
-        format!("Request, image: , text: {}, transparency: {}", wm_text, alpha)
-    )
+#[post("/resize")]
+async fn resize_handler(
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<ResizeQuery>,
+) -> HttpResponse {
+    let source = match get_source(req, body).await {
+        Ok(src) => src,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+        }
+    };
+
+    let ar = query.aspect_ratio.as_deref().unwrap_or("preserve");
+
+    let resized = image_processor::resize_image(source, query.width, query.height, ar).await;
+
+    let img = match resized {
+        Ok(img) => img,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error resizing image: {}", e));
+        }
+    };
+
+    let mut buf = BufWriter::new(Cursor::new(Vec::new()));
+    if let Err(e) = img.write_to(&mut buf, ImageFormat::Png) {
+        return HttpResponse::InternalServerError().body(format!("Error encoding image: {}", e));
+    }
+    let bytes = buf.into_inner().unwrap().into_inner();
+    HttpResponse::Ok()
+        .content_type("application/octet-stream")
+        .body(bytes)
 }
 
 #[actix_web::main]
@@ -129,6 +163,7 @@ async fn main() -> std::io::Result<()> {
     let server = HttpServer::new(|| App::new()
             .service(watermark)
             .service(slice)
+            .service(resize_handler)
         )
         .bind(("0.0.0.0", port))?
         .run()
