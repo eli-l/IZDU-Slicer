@@ -8,9 +8,6 @@ fn image_url_payload(url: &str) -> serde_json::Value {
     serde_json::json!({ "image_url": url })
 }
 
-/// 1x1 red PNG as base64 (generated with Python/zlib).
-const TINY_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
-
 /// 4x4 blue PNG as base64.
 const SMALL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGNgYPiPhIjiAACOsw/xs6MvMwAAAABJRU5ErkJggg==";
 
@@ -153,12 +150,12 @@ async fn test_resize_width_and_height_ignore() {
     );
 }
 
-/// Test 5: No dimensions provided — returns original image.
+/// Test 5: No dimensions provided — returns original image (uses embedded test PNG).
 #[tokio::test]
 async fn test_resize_no_dimensions() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
     .unwrap();
 
     let resp = resize_request(payload, "application/json", None).await;
@@ -166,7 +163,8 @@ async fn test_resize_no_dimensions() {
     assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
     assert!(
         get_ct(&resp).starts_with("image/png"),
-        "Expected image/png content-type"
+        "Expected image/png, got {}",
+        get_ct(&resp)
     );
 }
 

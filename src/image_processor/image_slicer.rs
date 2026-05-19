@@ -95,8 +95,8 @@ pub fn resize_single(
 ) -> DynamicImage {
     match (width, height, aspect_ratio) {
         (None, None, _) => img,
-        (None, Some(h), "ignore") => img.resize(h, h, image::imageops::FilterType::Triangle),
-        (Some(w), None, "ignore") => img.resize(w, w, image::imageops::FilterType::Triangle),
+        (None, Some(_h), "ignore") => img, // caller must validate: ignore requires both dims
+        (Some(_w), None, "ignore") => img, // caller must validate: ignore requires both dims
         (Some(w), Some(h), "ignore") => img.resize_exact(w, h, image::imageops::FilterType::Triangle),
         (Some(w), Some(h), _) => img.resize(w, h, image::imageops::FilterType::Triangle),
         (Some(w), None, _) => {

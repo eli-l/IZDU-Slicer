@@ -132,6 +132,12 @@ pub async fn resize_handler(
 
     let ar = query.aspect_ratio.as_deref().unwrap_or("preserve");
 
+    if ar == "ignore" && (query.width.is_none() || query.height.is_none()) {
+        return HttpResponse::BadRequest().body(
+            "aspect_ratio=ignore requires both width and height",
+        );
+    }
+
     let img = match image_processor::resize_image(source, query.width, query.height, ar).await {
         Ok(img) => img,
         Err(e) => {
@@ -154,6 +160,8 @@ pub async fn resize_handler(
         }
     };
     let bytes = cursor.into_inner();
+
+    println!("Resized image: {}x{}", img.width(), img.height());
 
     HttpResponse::Ok()
         .content_type("image/png")
