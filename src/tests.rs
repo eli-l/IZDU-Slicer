@@ -301,3 +301,290 @@ async fn test_resize_height_preserves_aspect_ratio() {
 
     assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
 }
+
+// ---------------------------------------------------------------------------
+// Watermark integration tests
+// ---------------------------------------------------------------------------
+
+use image::{GenericImageView, ImageBuffer, Rgba};
+use base64::Engine;
+
+/// Helper: decode PNG bytes from the /slice octet-stream response body.
+fn decode_slices(body: bytes::Bytes) -> Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut slices = Vec::new();
+    let data = body.as_ref();
+    let png_sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut start = 0;
+    for _ in 0..4 {
+        let idx = data[start..].windows(8).position(|w| w == png_sig);
+        let Some(pos) = idx else { break };
+        let sig_start = start + pos;
+        let next_sig = data[sig_start + 8..].windows(8).position(|w| w == png_sig);
+        let end = match next_sig {
+            Some(n) => sig_start + 8 + n,
+            None => data.len(),
+        };
+        let png_data = &data[sig_start..end];
+        match image::load_from_memory(png_data) {
+            Ok(img) => slices.push(img.to_rgba8()),
+            Err(_) => break,
+        }
+        start = end;
+    }
+    slices
+}
+
+/// Verify a slice pixel differs from the base image blue — indicating watermark
+/// text was rendered onto it.
+fn slice_has_watermark(slice: &ImageBuffer<Rgba<u8>, Vec<u8>>, base_blue: Rgba<u8>) -> bool {
+    // Any pixel that differs from base blue means watermark is present
+    GenericImageView::pixels(slice).any(|(_, _, px)| px != base_blue)
+}
+
+// 4x4 blue base image pixel
+const BLUE_PIXEL: Rgba<u8> = Rgba([0, 0, 255, 255]);
+
+async fn slice_request(
+    body: impl Into<bytes::Bytes>,
+    content_type: &str,
+    query: Option<Vec<(&str, &str)>>,
+) -> ServiceResponse {
+    let mut app = test::init_service(
+        actix_web::App::new().service(crate::slice)
+    ).await;
+
+    let uri = match &query {
+        Some(params) => {
+            let query_str = params
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&");
+            format!("/slice?{}", query_str)
+        }
+        None => "/slice".to_string(),
+    };
+
+    let req = test::TestRequest::post()
+        .uri(&uri)
+        .set_payload(body)
+        .insert_header((header::CONTENT_TYPE, content_type))
+        .to_request();
+
+    actix_web::test::call_service(&mut app, req).await
+}
+
+/// Watermark 1: POST /slice with watermark text — verify 4 slices are returned
+/// and each slice shows the watermark (pixel differs from original blue base).
+#[tokio::test]
+async fn test_slice_with_watermark_text_returns_slices() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = slice_request(
+        payload,
+        "application/json",
+        Some(vec![("watermark", "IZDU")]),
+    )
+    .await;
+
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "Expected 200 OK, got {}",
+        resp.status()
+    );
+
+    let body = actix_web::test::read_body(resp).await;
+    let slices = decode_slices(body);
+
+    assert_eq!(slices.len(), 4, "Expected 4 slices from /slice");
+
+    // Each slice should show the watermark — at least one pixel differs from base
+    for (i, slice) in slices.iter().enumerate() {
+        let has_wm = slice_has_watermark(slice, BLUE_PIXEL);
+        assert!(
+            has_wm,
+            "slice {} should show watermark text (pixel differs from base)",
+            i
+        );
+    }
+}
+
+/// Watermark 2: transparency=0 (fully opaque) — watermark must be clearly visible.
+#[tokio::test]
+async fn test_slice_watermark_transparency_zero_opaque() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = slice_request(
+        payload,
+        "application/json",
+        Some(vec![("watermark", "IZDU"), ("transparency", "0")]),
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let body = actix_web::test::read_body(resp).await;
+    let slices = decode_slices(body);
+
+    assert_eq!(slices.len(), 4);
+    for (i, slice) in slices.iter().enumerate() {
+        let has_wm = slice_has_watermark(slice, BLUE_PIXEL);
+        assert!(
+            has_wm,
+            "transparency=0 (opaque): slice {} should have visible watermark",
+            i
+        );
+    }
+}
+
+/// Watermark 3: transparency=100 (fully invisible) — slices should be unchanged
+/// from the base image (no watermark pixels).
+#[tokio::test]
+async fn test_slice_watermark_transparency_100_invisible() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = slice_request(
+        payload,
+        "application/json",
+        Some(vec![("watermark", "IZDU"), ("transparency", "100")]),
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let body = actix_web::test::read_body(resp).await;
+    let slices = decode_slices(body);
+
+    assert_eq!(slices.len(), 4);
+    // With transparency=100 the watermark is invisible, so center pixels should
+    // still be the base blue (or very close — no watermark overlay)
+    for (i, slice) in slices.iter().enumerate() {
+        let cx = slice.width() / 2;
+        let cy = slice.height() / 2;
+        // Check that center is still blue (no watermark composited)
+        let center = slice.get_pixel(cx, cy);
+        assert_eq!(
+            *center,
+            BLUE_PIXEL,
+            "transparency=100: slice {} center should remain base blue (no overlay)",
+            i
+        );
+    }
+}
+
+/// Watermark 4: transparency=50 (partial blend) — verify slices are returned and
+/// the watermark affects pixels (differs from base).
+#[tokio::test]
+async fn test_slice_watermark_transparency_50_blends() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = slice_request(
+        payload,
+        "application/json",
+        Some(vec![("watermark", "X"), ("transparency", "50")]),
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let body = actix_web::test::read_body(resp).await;
+    let slices = decode_slices(body);
+
+    assert_eq!(slices.len(), 4);
+    // Even at 50% transparency, the watermark should affect center pixels
+    for (i, slice) in slices.iter().enumerate() {
+        let has_wm = slice_has_watermark(slice, BLUE_PIXEL);
+        assert!(
+            has_wm,
+            "transparency=50: slice {} should show watermark (blended)",
+            i
+        );
+    }
+}
+
+/// Watermark 5: no watermark param — slices should be returned with no watermark.
+#[tokio::test]
+async fn test_slice_without_watermark_unchanged() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = slice_request(payload, "application/json", None).await;
+
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let body = actix_web::test::read_body(resp).await;
+    let slices = decode_slices(body);
+
+    assert_eq!(slices.len(), 4);
+    // Without watermark, slices should still be blue (unchanged)
+    for (i, slice) in slices.iter().enumerate() {
+        let cx = slice.width() / 2;
+        let cy = slice.height() / 2;
+        let center = slice.get_pixel(cx, cy);
+        assert_eq!(
+            *center,
+            BLUE_PIXEL,
+            "no watermark: slice {} should remain base blue",
+            i
+        );
+    }
+}
+
+/// Watermark 6: watermark text rendering — verify that "IZDU" watermark text
+/// produces a different pixel pattern than "XXXX" (different text = different output).
+#[tokio::test]
+async fn test_slice_watermark_text_affects_pixel_pattern() {
+    // Request with "IZDU"
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp_a = slice_request(
+        payload.clone(),
+        "application/json",
+        Some(vec![("watermark", "IZDU"), ("transparency", "0")]),
+    )
+    .await;
+
+    // Request with "XXXX"
+    let resp_b = slice_request(
+        payload,
+        "application/json",
+        Some(vec![("watermark", "XXXX"), ("transparency", "0")]),
+    )
+    .await;
+
+    let body_a = actix_web::test::read_body(resp_a).await;
+    let body_b = actix_web::test::read_body(resp_b).await;
+
+    let slices_a = decode_slices(body_a);
+    let slices_b = decode_slices(body_b);
+
+    assert_eq!(slices_a.len(), 4);
+    assert_eq!(slices_b.len(), 4);
+
+    // Compare raw pixel data: different watermark text should produce different images
+    let raw_a = slices_a[0].as_raw();
+    let raw_b = slices_b[0].as_raw();
+
+    assert_ne!(
+        raw_a, raw_b,
+        "Different watermark text ('IZDU' vs 'XXXX') should produce different pixel data"
+    );
+}
