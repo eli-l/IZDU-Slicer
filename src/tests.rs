@@ -307,7 +307,6 @@ async fn test_resize_height_preserves_aspect_ratio() {
 // ---------------------------------------------------------------------------
 
 use image::{GenericImageView, ImageBuffer, Rgba};
-use base64::Engine;
 
 /// Helper: decode PNG bytes from the /slice octet-stream response body.
 fn decode_slices(body: bytes::Bytes) -> Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> {

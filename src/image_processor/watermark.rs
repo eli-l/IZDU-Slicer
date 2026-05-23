@@ -1,4 +1,4 @@
-use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 
 pub type Watermark = DynamicImage;
@@ -9,9 +9,11 @@ pub fn create_watermark(text: &str, size: (u32, u32)) -> Watermark {
 
     let scale = PxScale::from(40.0);
     let (width, height) = size;
-    let wm_image =
-        DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text))
-            .resize_exact(width, height, image::imageops::FilterType::Nearest);
+    let wm_image = DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text)).resize_exact(
+        width,
+        height,
+        image::imageops::FilterType::Lanczos3,
+    );
     wm_image
 }
 
@@ -22,18 +24,17 @@ fn render_text_to_image(
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let scaled_font = font.as_scaled(scale);
 
-    let ascent = scaled_font.ascent();
-    let descent = scaled_font.descent();
-    let line_height = ascent - descent;
+    let baseline_y = scaled_font.ascent();
 
-    // Collect glyphs for all characters
-    let mut glyphs: Vec<(ab_glyph::Glyph, f32)> = Vec::new();
+    // Collect positioned glyphs for all characters.
+    let mut glyphs: Vec<ab_glyph::Glyph> = Vec::new();
     let mut cursor_x: f32 = 0.0;
 
     for c in text.chars() {
-        let glyph = scaled_font.scaled_glyph(c);
+        let mut glyph = scaled_font.scaled_glyph(c);
         let h_advance = scaled_font.h_advance(glyph.id);
-        glyphs.push((glyph, cursor_x));
+        glyph.position = point(cursor_x, baseline_y);
+        glyphs.push(glyph);
         cursor_x += h_advance;
     }
 
@@ -41,28 +42,37 @@ fn render_text_to_image(
         return ImageBuffer::new(1, 1);
     }
 
-    // Calculate bounds
-    let mut max_x: f32 = 0.0;
-    let mut max_y: f32 = 0.0;
+    // Calculate pixel bounds from positioned glyphs. These bounds are not the
+    // same as layout advances, so keep the advance cursor separate from bounds.
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
 
-    for (ref glyph, x_pos) in &glyphs {
-        if let Some(outlined) = font.outline_glyph((*glyph).clone()) {
+    for glyph in &glyphs {
+        if let Some(outlined) = font.outline_glyph(glyph.clone()) {
             let bounds = outlined.px_bounds();
-            max_x = max_x.max(x_pos + bounds.max.x);
+            min_x = min_x.min(bounds.min.x);
+            min_y = min_y.min(bounds.min.y);
+            max_x = max_x.max(bounds.max.x);
             max_y = max_y.max(bounds.max.y);
         }
     }
 
-    let img_width = (max_x.ceil() as u32).max(1);
-    let img_height = (line_height.ceil() as u32).max(1);
+    if !min_x.is_finite() {
+        return ImageBuffer::new(cursor_x.ceil().max(1.0) as u32, 1);
+    }
+
+    let img_width = ((max_x - min_x).ceil() as u32).max(1);
+    let img_height = ((max_y - min_y).ceil() as u32).max(1);
     let mut image = ImageBuffer::new(img_width, img_height);
 
     // Draw each glyph
-    for (glyph, x_pos) in glyphs {
+    for glyph in glyphs {
         if let Some(outlined) = font.outline_glyph(glyph) {
             let bounds = outlined.px_bounds();
-            let draw_x = (x_pos + bounds.min.x) as f32;
-            let draw_y = (ascent + bounds.min.y) as f32;
+            let draw_x = bounds.min.x - min_x;
+            let draw_y = bounds.min.y - min_y;
 
             outlined.draw(|px, py, coverage| {
                 let x = (draw_x + px as f32) as u32;
@@ -115,8 +125,8 @@ pub fn add_watermark(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{GenericImageView, ImageBuffer, Rgba};
     use base64::Engine;
+    use image::{ImageBuffer, Rgba};
 
     // 4x4 blue PNG decoded from base64
     fn small_blue_img() -> ImageBuffer<Rgba<u8>, Vec<u8>> {
@@ -129,15 +139,7 @@ mod tests {
 
     // 1x1 red PNG bytes -> ImageBuffer
     fn tiny_red_img() -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-        let bytes: [u8; 66] = [
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0a,
-            0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-            0x08, 0x02, 0x4b, 0x0f, 0x51, 0x7d, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44,
-            0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01,
-            0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
-            0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-        ];
-        image::load_from_memory(&bytes).unwrap().to_rgba8()
+        ImageBuffer::from_pixel(1, 1, Rgba([255, 0, 0, 255]))
     }
 
     // ------------------------------------------------------------------
@@ -170,6 +172,30 @@ mod tests {
             wm_a.to_rgba8().as_raw(),
             wm_b.to_rgba8().as_raw(),
             "different text should produce different watermark images"
+        );
+    }
+
+    #[test]
+    fn render_text_to_image_advances_glyphs_horizontally() {
+        let font_data = include_bytes!("../../resources/OpenSans-Regular.ttf");
+        let font = FontRef::try_from_slice(font_data).unwrap();
+        let scale = PxScale::from(40.0);
+        let scaled_font = font.as_scaled(scale);
+        let h_advance = scaled_font.h_advance(scaled_font.glyph_id('H'));
+
+        let image = render_text_to_image(&font, scale, "HH");
+        let has_second_glyph_pixels = image
+            .enumerate_pixels()
+            .any(|(x, _, p)| x as f32 >= h_advance && p[3] > 0);
+
+        assert!(h_advance > 0.0, "glyph advance should be non-zero");
+        assert!(
+            image.width() as f32 > h_advance,
+            "image bounds should include the advanced second glyph"
+        );
+        assert!(
+            has_second_glyph_pixels,
+            "second glyph should render after the first glyph advance"
         );
     }
 
