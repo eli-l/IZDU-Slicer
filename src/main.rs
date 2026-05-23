@@ -25,8 +25,8 @@ struct SliceQuery {
 }
 
 #[derive(Deserialize)]
-struct WatermarkQuery {
-    text: Option<String>,
+struct WatermarkTextQuery {
+    text: String,
     transparency: Option<u16>,
 }
 
@@ -98,22 +98,56 @@ async fn slice(
 
 #[post("/watermark")]
 async fn watermark(
-    query: web::Query<WatermarkQuery>,
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<WatermarkTextQuery>,
 ) -> HttpResponse {
-    let wm_text = match &query.text {
-        Some(val) => val,
-        None => "IZDU-Slicer",
+    let source = match get_source(req, body).await {
+        Ok(src) => src,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+        }
     };
 
-    let alpha = match &query.transparency {
-        Some(val) => *val as f32 / 100.0,
-        None => 0.3,
+    let text = query.text.trim();
+    let alpha = query.transparency.unwrap_or(30) as f32 / 100.0;
+
+    // Load image and get its dimensions
+    let img = match image_processor::load_image(source).await {
+        Ok(img) => img,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error loading image: {}", e));
+        }
     };
 
-    HttpResponse::Ok().content_type("text/plain").body(format!(
-        "Request, image: , text: {}, transparency: {}",
-        wm_text, alpha
-    ))
+    let (w, h) = (img.width(), img.height());
+
+    // Create watermark at image dimensions
+    let wm_image = image_processor::watermark::create_watermark(text, (w, h));
+
+    // Apply watermark
+    let watermarked = image_processor::watermark::add_watermark(
+        img.to_rgba8(),
+        &wm_image,
+        alpha,
+    );
+
+    // Encode to PNG
+    let mut buf = BufWriter::new(Cursor::new(Vec::new()));
+    if watermarked.write_to(&mut buf, ImageFormat::Png).is_err() {
+        return HttpResponse::InternalServerError().body("Error encoding image");
+    }
+    let cursor = match BufWriter::into_inner(buf) {
+        Ok(c) => c,
+        Err(_) => return HttpResponse::InternalServerError().body("Error finalizing image"),
+    };
+    let bytes = cursor.into_inner();
+
+    println!("Watermarked image: {}x{}, text: \"{}\", transparency: {}", w, h, text, alpha);
+
+    HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
 #[post("/resize")]

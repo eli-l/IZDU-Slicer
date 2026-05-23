@@ -53,7 +53,7 @@ IZDU-Slicer/
 
 The application entry point. Bootstraps an actix-web `HttpServer` that listens on port `9090` (configurable via `PORT` env var).
 
-Two endpoints are registered:
+Three endpoints are registered:
 
 #### `POST /slice`
 
@@ -69,7 +69,7 @@ or
 ```
 
 **Query parameters** (all optional):
-- `scale` — target size in pixels (0 = no scaling). Images larger than this will be downscaled to fit within `scale × scale`. Aspect ratio is preserved using `Nearest` filter.
+- `scale` — target size in pixels (0 = no scaling). Images larger than this will be downscaled to fit within `scale × scale`. Aspect ratio is preserved using `Lanczos3` filter.
 - `watermark` — text string to render as a watermark on each slice.
 - `transparency` — watermark opacity (0–100), defaults to 30.
 
@@ -77,7 +77,7 @@ or
 
 #### `POST /watermark`
 
-Placeholder endpoint (TODO). Returns a plain-text summary of query parameters. Not yet functional for actual watermark operations.
+Applies a text watermark to an image and returns the watermarked result as a single PNG. Same input sources as `/slice` (`image_url`, `image_base64`, or raw binary).
 
 ---
 
@@ -129,7 +129,7 @@ Handles all image loading and dispatch logic.
 
 **`slice_images_copy_px(img, size)`** — legacy pixel-by-pixel copy implementation. Kept for reference; unused.
 
-**`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
+**`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Lanczos3`.
 
 ---
 
