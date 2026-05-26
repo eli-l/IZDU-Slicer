@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-actix-web="4"
+actix-web = "4"
 futures = "0.3"
 image = "0.24.6"
 reqwest = "0.11"
@@ -17,7 +17,16 @@ base64 = "0.21"
 bytes = "1"
 actix-service = "2"
 
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio-stream = "0.1"
+
 [dev-dependencies]
 actix-rt = "2"
 actix-service = "2"
 tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+tonic-build = "0.12"

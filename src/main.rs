@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+mod grpc;
 mod image_processor;
 
 use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer};
@@ -113,7 +114,6 @@ async fn watermark(
     let text = query.text.trim();
     let alpha = query.transparency.unwrap_or(30) as f32 / 100.0;
 
-    // Load image and get its dimensions
     let img = match image_processor::load_image(source).await {
         Ok(img) => img,
         Err(e) => {
@@ -123,18 +123,9 @@ async fn watermark(
     };
 
     let (w, h) = (img.width(), img.height());
-
-    // Create watermark at image dimensions
     let wm_image = image_processor::watermark::create_watermark(text, (w, h));
+    let watermarked = image_processor::watermark::add_watermark(img.to_rgba8(), &wm_image, alpha);
 
-    // Apply watermark
-    let watermarked = image_processor::watermark::add_watermark(
-        img.to_rgba8(),
-        &wm_image,
-        alpha,
-    );
-
-    // Encode to PNG
     let mut buf = BufWriter::new(Cursor::new(Vec::new()));
     if watermarked.write_to(&mut buf, ImageFormat::Png).is_err() {
         return HttpResponse::InternalServerError().body("Error encoding image");
@@ -146,7 +137,6 @@ async fn watermark(
     let bytes = cursor.into_inner();
 
     println!("Watermarked image: {}x{}, text: \"{}\", transparency: {}", w, h, text, alpha);
-
     HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
@@ -180,47 +170,68 @@ pub async fn resize_handler(
         }
     };
 
-    // Encode to PNG bytes
     let mut buf = BufWriter::new(Cursor::new(Vec::new()));
     if img.write_to(&mut buf, ImageFormat::Png).is_err() {
-        return HttpResponse::InternalServerError()
-            .body("Error encoding image");
+        return HttpResponse::InternalServerError().body("Error encoding image");
     }
     let cursor = match BufWriter::into_inner(buf) {
         Ok(c) => c,
         Err(_) => {
-            return HttpResponse::InternalServerError()
-                .body("Error finalizing image");
+            return HttpResponse::InternalServerError().body("Error finalizing image");
         }
     };
     let bytes = cursor.into_inner();
 
     println!("Resized image: {}x{}", img.width(), img.height());
-
-    HttpResponse::Ok()
-        .content_type("image/png")
-        .body(bytes)
+    HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Running");
 
-    let port_str = env::var("PORT").unwrap_or_else(|_| {
-        println!("PORT not set, using default 9090");
-        String::from("9090")
+    let grpc_port: u16 = env::var("GRPC_PORT")
+        .unwrap_or_else(|_| {
+            println!("GRPC_PORT not set, using default 50051");
+            String::from("50051")
+        })
+        .trim()
+        .parse()
+        .unwrap_or(50051);
+
+    // Run gRPC server in background task (needs to be Send)
+    let grpc_addr: std::net::SocketAddr = format!("0.0.0.0:{}", grpc_port)
+        .parse()
+        .expect("invalid gRPC address");
+
+    tokio::spawn(async move {
+        println!("Starting gRPC server on {}", grpc_addr);
+        let module = grpc::server::GrpcServer::default();
+        tonic::transport::Server::builder()
+            .add_service(grpc::ImageProcessorServer::new(module))
+            .serve(grpc_addr)
+            .await
+            .expect("gRPC server error");
     });
 
-    let port = port_str.trim().parse().unwrap();
+    // HTTP server on main actix thread
+    let http_port: u16 = env::var("PORT")
+        .unwrap_or_else(|_| {
+            println!("PORT not set, using default 9090");
+            String::from("9090")
+        })
+        .trim()
+        .parse()
+        .unwrap_or(9090);
 
-    let server = HttpServer::new(|| App::new()
+    println!("Starting HTTP server on 0.0.0.0:{}", http_port);
+    HttpServer::new(|| {
+        App::new()
             .service(watermark)
             .service(slice)
             .service(resize_handler)
-        )
-        .bind(("0.0.0.0", port))?
-        .run()
-        .await;
-
-    server
+    })
+    .bind(("0.0.0.0", http_port))?
+    .run()
+    .await
 }
