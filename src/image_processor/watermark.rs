@@ -9,12 +9,11 @@ pub fn create_watermark(text: &str, size: (u32, u32)) -> Watermark {
 
     let scale = PxScale::from(40.0);
     let (width, height) = size;
-    let wm_image = DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text)).resize_exact(
+    DynamicImage::ImageRgba8(render_text_to_image(&font, scale, text)).resize_exact(
         width,
         height,
         image::imageops::FilterType::Lanczos3,
-    );
-    wm_image
+    )
 }
 
 fn render_text_to_image(

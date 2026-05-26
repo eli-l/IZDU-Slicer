@@ -203,10 +203,8 @@ async fn main() -> std::io::Result<()> {
         .expect("invalid gRPC address");
 
     tokio::spawn(async move {
-        println!("Starting gRPC server on {}", grpc_addr);
         println!("gRPC server listening on {}", grpc_addr);
-        println!("gRPC server ready to accept requests");
-        let module = grpc::server::GrpcServer::default();
+        let module = grpc::server::GrpcServer;
         tonic::transport::Server::builder()
             .add_service(grpc::ImageProcessorServer::new(module))
             .serve(grpc_addr)

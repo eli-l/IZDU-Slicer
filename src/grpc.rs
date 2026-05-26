@@ -135,7 +135,7 @@ pub mod server {
             let (w, h) = (img.width(), img.height());
             let wm = watermark::create_watermark(&text, (w, h));
             let watermarked = watermark::add_watermark(img.to_rgba8(), &wm, alpha as f32 / 100.0);
-            let data = encode_png(watermarked).map_err(|e| Status::internal(e))?;
+            let data = encode_png(watermarked).map_err(Status::internal)?;
 
             Ok(Response::new(ProtoWatermarkResponse {
                 data: data.to_vec(),
@@ -173,7 +173,7 @@ pub mod server {
                 .map_err(|e| Status::internal(e.to_string()))?;
 
             let resized = image_slicer::resize_single(img, width, height, &ar);
-            let data = encode_png(resized.to_rgba8()).map_err(|e| Status::internal(e))?;
+            let data = encode_png(resized.to_rgba8()).map_err(Status::internal)?;
 
             Ok(Response::new(ProtoResizeResponse {
                 data: data.to_vec(),
