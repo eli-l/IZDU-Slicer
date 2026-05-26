@@ -204,6 +204,7 @@ async fn main() -> std::io::Result<()> {
 
     tokio::spawn(async move {
         println!("Starting gRPC server on {}", grpc_addr);
+        println!("gRPC server listening on {}", grpc_addr);
         println!("gRPC server ready to accept requests");
         let module = grpc::server::GrpcServer::default();
         tonic::transport::Server::builder()
