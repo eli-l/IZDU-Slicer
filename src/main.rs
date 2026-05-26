@@ -4,13 +4,13 @@ mod tests;
 mod grpc;
 mod image_processor;
 
+use crate::image_processor::get_source;
 use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures::stream::unfold;
 use image::ImageFormat;
 use serde::Deserialize;
 use std::env;
 use std::io::{BufWriter, Cursor};
-use crate::image_processor::get_source;
 
 #[derive(Deserialize)]
 struct ImagePayload {
@@ -39,11 +39,7 @@ struct ResizeQuery {
 }
 
 #[post("/slice")]
-async fn slice(
-    req: HttpRequest,
-    body: web::Bytes,
-    query: web::Query<SliceQuery>,
-) -> HttpResponse {
+async fn slice(req: HttpRequest, body: web::Bytes, query: web::Query<SliceQuery>) -> HttpResponse {
     let scale = query.scale.unwrap_or(300);
 
     let source = match get_source(req, body).await {
@@ -136,7 +132,10 @@ async fn watermark(
     };
     let bytes = cursor.into_inner();
 
-    println!("Watermarked image: {}x{}, text: \"{}\", transparency: {}", w, h, text, alpha);
+    println!(
+        "Watermarked image: {}x{}, text: \"{}\", transparency: {}",
+        w, h, text, alpha
+    );
     HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
@@ -157,9 +156,8 @@ pub async fn resize_handler(
     let ar = query.aspect_ratio.as_deref().unwrap_or("preserve");
 
     if ar == "ignore" && (query.width.is_none() || query.height.is_none()) {
-        return HttpResponse::BadRequest().body(
-            "aspect_ratio=ignore requires both width and height",
-        );
+        return HttpResponse::BadRequest()
+            .body("aspect_ratio=ignore requires both width and height");
     }
 
     let img = match image_processor::resize_image(source, query.width, query.height, ar).await {
@@ -206,6 +204,7 @@ async fn main() -> std::io::Result<()> {
 
     tokio::spawn(async move {
         println!("Starting gRPC server on {}", grpc_addr);
+        println!("gRPC server ready to accept requests");
         let module = grpc::server::GrpcServer::default();
         tonic::transport::Server::builder()
             .add_service(grpc::ImageProcessorServer::new(module))
