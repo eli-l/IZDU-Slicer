@@ -172,7 +172,7 @@ Handles all image loading and dispatch logic.
 
 **`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
 
-**`crop_image(img, a, b, c, d)`** — validates four crop points (ordering: `ax < bx`, `ay < cy`; bounds: `x < width`, `y < height`; axis-alignment; non-zero area), then calls `img.crop_imm(x, y, width, height)`. Coordinate contract is half-open intervals.
+**`crop_image(img, a, b, c, d)`** — validates four crop points (ordering: `ax < bx`, `ay < cy`; bounds: `x <= width`, `y <= height`; axis-alignment; non-zero area), then calls `img.crop_imm(x, y, width, height)`. Coordinate contract is half-open intervals.
 
 ---
 
@@ -234,14 +234,14 @@ main.rs: crop_handler()
     │
     ├─ get_source(req, body)          ──► ImageSource::{Url, Binary, Base64}
     │
-    ├─ load_image(source)              ──► DynamicImage
-    │
-    ├─ validate_crop_points(a, b, c, d) ──► bounds, axis-align, non-zero area
+    ├─ image_processor::crop_image(source, a, b, c, d)
     │       │
-    │       ├─ pass: compute x, y, width, height
-    │       └─ fail: return 400 Bad Request
+    │       ├─ load_image(source)              ──► DynamicImage
+    │       ├─ validate crop points            ──► bounds, axis-align
+    │       ├─ compute x, y, width, height     ──► non-zero area
+    │       └─ img.crop_imm(x, y, width, height) ──► DynamicImage
     │
-    ├─ img.crop_imm(x, y, width, height) ──► DynamicImage
+    ├─ crop failure                    ──► 400 Bad Request
     │
     ├─ encode_png()                    ──► PNG bytes
     │

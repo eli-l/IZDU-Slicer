@@ -330,6 +330,36 @@ async fn test_crop_valid_rectangle_returns_png() {
 }
 
 #[tokio::test]
+async fn test_crop_allows_right_and_bottom_edges() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = crop_request(
+        payload,
+        "application/json",
+        vec![
+            ("ax", "1"),
+            ("ay", "1"),
+            ("bx", "4"),
+            ("by", "1"),
+            ("cx", "1"),
+            ("cy", "4"),
+            ("dx", "4"),
+            ("dy", "4"),
+        ],
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
+
+    let body = actix_web::test::read_body(resp).await;
+    let cropped = image::load_from_memory(&body).expect("crop response should be a PNG");
+    assert_eq!(cropped.dimensions(), (3, 3));
+}
+
+#[tokio::test]
 async fn test_crop_out_of_bounds_returns_400() {
     let payload = serde_json::to_vec(&serde_json::json!({
         "image_base64": SMALL_PNG_BASE64

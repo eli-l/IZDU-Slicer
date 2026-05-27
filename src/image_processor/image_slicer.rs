@@ -119,7 +119,7 @@ pub fn resize_single(
 /// A = top-left, B = top-right, C = bottom-left, D = bottom-right.
 ///
 /// Coordinate contract (half-open intervals, per-pixel image space):
-/// - 0 ≤ x < image_width, 0 ≤ y < image_height
+/// - 0 ≤ x ≤ image_width, 0 ≤ y ≤ image_height
 /// - bx > ax (top-left X must be less than top-right X)
 /// - cy > ay (top-left Y must be less than bottom-left Y)
 /// - Output dimensions: width = bx - ax, height = cy - ay
@@ -157,11 +157,13 @@ fn validate_crop_points(
     let image_width = img.width();
     let image_height = img.height();
 
-    // Bounds: 0 ≤ x < image_width, 0 ≤ y < image_height
+    // Bounds: 0 ≤ x ≤ image_width, 0 ≤ y ≤ image_height.
+    // Ordering below keeps left/top coordinates inside the image while allowing
+    // right/bottom edges to touch image_width/image_height.
     for (name, (x, y)) in [("A", a), ("B", b), ("C", c), ("D", d)] {
-        if x >= image_width || y >= image_height {
+        if x > image_width || y > image_height {
             return Err(format!(
-                "point {} ({}, {}) is out of bounds for image {}x{} (valid range: 0 ≤ x < {}, 0 ≤ y < {})",
+                "point {} ({}, {}) is out of bounds for image {}x{} (valid range: 0 ≤ x ≤ {}, 0 ≤ y ≤ {})",
                 name, x, y, image_width, image_height, image_width, image_height
             ));
         }
@@ -170,8 +172,7 @@ fn validate_crop_points(
     // Ordering: ax < bx (top-left X before top-right X) and ay < cy (top-left Y before bottom-left Y)
     if a.0 >= b.0 || a.1 >= c.1 {
         return Err(
-            "crop points must have A.x < B.x and A.y < C.y (top-left must be above-left of top-right)"
-                .to_string(),
+            "crop points must have A.x < B.x and A.y < C.y (A is above-left of C)".to_string(),
         );
     }
 
