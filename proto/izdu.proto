@@ -1,0 +1,132 @@
+syntax = "proto3";
+
+package izdu;
+
+service ImageProcessor {
+  // Slice an image into 4 quadrants. Streams 4 PNG responses.
+  rpc Slice(SliceRequest) returns (stream SliceResponse);
+
+  // Apply watermark to an image. Returns single PNG.
+  rpc Watermark(WatermarkRequest) returns (WatermarkResponse);
+
+  // Resize an image. Returns single PNG.
+  rpc Resize(ResizeRequest) returns (ResizeResponse);
+
+  // Bidirectional streaming: send multiple requests, receive results as they complete.
+  // Each request carries its own ID so client can correlate.
+  rpc ProcessBatch(stream BatchRequest) returns (stream BatchResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+message ImageSource {
+  oneof source {
+    string url = 1;
+    bytes data = 2;
+    string base64 = 3;
+  }
+}
+
+message WatermarkConfig {
+  string text = 1;
+  uint32 transparency = 2; // 0-100, default 30
+}
+
+message ResizeConfig {
+  uint32 width = 1;
+  uint32 height = 2;
+  string aspect_ratio = 3; // "preserve" or "ignore"
+}
+
+// ---------------------------------------------------------------------------
+// Slice
+// ---------------------------------------------------------------------------
+
+message SliceRequest {
+  ImageSource source = 1;
+  uint32 scale = 2; // target size in px, 0 = no scaling
+  WatermarkConfig watermark = 3;
+}
+
+message SliceResponse {
+  uint32 index = 1;       // 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
+  bytes data = 2;         // PNG image bytes
+  string error = 3;       // set if this slice failed
+}
+
+// ---------------------------------------------------------------------------
+// Watermark
+// ---------------------------------------------------------------------------
+
+message WatermarkRequest {
+  ImageSource source = 1;
+  WatermarkConfig watermark = 2;
+}
+
+message WatermarkResponse {
+  bytes data = 1;         // PNG image bytes
+  string error = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Resize
+// ---------------------------------------------------------------------------
+
+message ResizeRequest {
+  ImageSource source = 1;
+  ResizeConfig resize = 2;
+}
+
+message ResizeResponse {
+  bytes data = 1;         // PNG image bytes
+  string error = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Batch
+// ---------------------------------------------------------------------------
+
+message BatchRequest {
+  string request_id = 1;  // echoed in response for correlation
+  Operation operation = 2;
+}
+
+message Operation {
+  oneof op {
+    SliceOp slice = 1;
+    WatermarkOp watermark = 2;
+    ResizeOp resize = 3;
+  }
+}
+
+message SliceOp {
+  ImageSource source = 1;
+  uint32 scale = 2;
+  WatermarkConfig watermark = 3;
+}
+
+message WatermarkOp {
+  ImageSource source = 1;
+  WatermarkConfig watermark = 2;
+}
+
+message ResizeOp {
+  ImageSource source = 1;
+  ResizeConfig resize = 2;
+}
+
+message BatchResponse {
+  string request_id = 1;
+  string error = 2;
+  oneof result {
+    BatchSliceResult slice = 3;
+    WatermarkResponse watermark = 4;
+    ResizeResponse resize = 5;
+  }
+}
+
+message BatchSliceResult {
+  repeated SliceResponse slices = 1; // all 4 slices, or fewer on error
+}

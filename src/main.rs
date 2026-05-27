@@ -1,15 +1,16 @@
 #[cfg(test)]
 mod tests;
 
+mod grpc;
 mod image_processor;
 
+use crate::image_processor::get_source;
 use actix_web::{error, post, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures::stream::unfold;
 use image::ImageFormat;
 use serde::Deserialize;
 use std::env;
 use std::io::{BufWriter, Cursor};
-use crate::image_processor::get_source;
 
 #[derive(Deserialize)]
 struct ImagePayload {
@@ -25,8 +26,8 @@ struct SliceQuery {
 }
 
 #[derive(Deserialize)]
-struct WatermarkQuery {
-    text: Option<String>,
+struct WatermarkTextQuery {
+    text: String,
     transparency: Option<u16>,
 }
 
@@ -38,11 +39,7 @@ struct ResizeQuery {
 }
 
 #[post("/slice")]
-async fn slice(
-    req: HttpRequest,
-    body: web::Bytes,
-    query: web::Query<SliceQuery>,
-) -> HttpResponse {
+async fn slice(req: HttpRequest, body: web::Bytes, query: web::Query<SliceQuery>) -> HttpResponse {
     let scale = query.scale.unwrap_or(300);
 
     let source = match get_source(req, body).await {
@@ -98,22 +95,49 @@ async fn slice(
 
 #[post("/watermark")]
 async fn watermark(
-    query: web::Query<WatermarkQuery>,
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<WatermarkTextQuery>,
 ) -> HttpResponse {
-    let wm_text = match &query.text {
-        Some(val) => val,
-        None => "IZDU-Slicer",
+    let source = match get_source(req, body).await {
+        Ok(src) => src,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+        }
     };
 
-    let alpha = match &query.transparency {
-        Some(val) => *val as f32 / 100.0,
-        None => 0.3,
+    let text = query.text.trim();
+    let transparency = query.transparency.unwrap_or(30).min(100);
+    let alpha = transparency as f32 / 100.0;
+
+    let img = match image_processor::load_image(source).await {
+        Ok(img) => img,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error loading image: {}", e));
+        }
     };
 
-    HttpResponse::Ok().content_type("text/plain").body(format!(
-        "Request, image: , text: {}, transparency: {}",
-        wm_text, alpha
-    ))
+    let (w, h) = (img.width(), img.height());
+    let wm_image = image_processor::watermark::create_watermark(text, (w, h));
+    let watermarked = image_processor::watermark::add_watermark(img.to_rgba8(), &wm_image, alpha);
+
+    let mut buf = BufWriter::new(Cursor::new(Vec::new()));
+    if watermarked.write_to(&mut buf, ImageFormat::Png).is_err() {
+        return HttpResponse::InternalServerError().body("Error encoding image");
+    }
+    let cursor = match BufWriter::into_inner(buf) {
+        Ok(c) => c,
+        Err(_) => return HttpResponse::InternalServerError().body("Error finalizing image"),
+    };
+    let bytes = cursor.into_inner();
+
+    println!(
+        "Watermarked image: {}x{}, text: \"{}\", transparency: {}",
+        w, h, text, transparency
+    );
+    HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
 #[post("/resize")]
@@ -133,9 +157,8 @@ pub async fn resize_handler(
     let ar = query.aspect_ratio.as_deref().unwrap_or("preserve");
 
     if ar == "ignore" && (query.width.is_none() || query.height.is_none()) {
-        return HttpResponse::BadRequest().body(
-            "aspect_ratio=ignore requires both width and height",
-        );
+        return HttpResponse::BadRequest()
+            .body("aspect_ratio=ignore requires both width and height");
     }
 
     let img = match image_processor::resize_image(source, query.width, query.height, ar).await {
@@ -146,47 +169,68 @@ pub async fn resize_handler(
         }
     };
 
-    // Encode to PNG bytes
     let mut buf = BufWriter::new(Cursor::new(Vec::new()));
     if img.write_to(&mut buf, ImageFormat::Png).is_err() {
-        return HttpResponse::InternalServerError()
-            .body("Error encoding image");
+        return HttpResponse::InternalServerError().body("Error encoding image");
     }
     let cursor = match BufWriter::into_inner(buf) {
         Ok(c) => c,
         Err(_) => {
-            return HttpResponse::InternalServerError()
-                .body("Error finalizing image");
+            return HttpResponse::InternalServerError().body("Error finalizing image");
         }
     };
     let bytes = cursor.into_inner();
 
     println!("Resized image: {}x{}", img.width(), img.height());
-
-    HttpResponse::Ok()
-        .content_type("image/png")
-        .body(bytes)
+    HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Running");
 
-    let port_str = env::var("PORT").unwrap_or_else(|_| {
-        println!("PORT not set, using default 9090");
-        String::from("9090")
+    let grpc_port: u16 = env::var("GRPC_PORT")
+        .unwrap_or_else(|_| {
+            println!("GRPC_PORT not set, using default 50051");
+            String::from("50051")
+        })
+        .trim()
+        .parse()
+        .unwrap_or(50051);
+
+    // Run gRPC server in background task (needs to be Send)
+    let grpc_addr: std::net::SocketAddr = format!("0.0.0.0:{}", grpc_port)
+        .parse()
+        .expect("invalid gRPC address");
+
+    tokio::spawn(async move {
+        println!("gRPC server listening on {}", grpc_addr);
+        let module = grpc::server::GrpcServer;
+        tonic::transport::Server::builder()
+            .add_service(grpc::ImageProcessorServer::new(module))
+            .serve(grpc_addr)
+            .await
+            .expect("gRPC server error");
     });
 
-    let port = port_str.trim().parse().unwrap();
+    // HTTP server on main actix thread
+    let http_port: u16 = env::var("PORT")
+        .unwrap_or_else(|_| {
+            println!("PORT not set, using default 9090");
+            String::from("9090")
+        })
+        .trim()
+        .parse()
+        .unwrap_or(9090);
 
-    let server = HttpServer::new(|| App::new()
+    println!("Starting HTTP server on 0.0.0.0:{}", http_port);
+    HttpServer::new(|| {
+        App::new()
             .service(watermark)
             .service(slice)
             .service(resize_handler)
-        )
-        .bind(("0.0.0.0", port))?
-        .run()
-        .await;
-
-    server
+    })
+    .bind(("0.0.0.0", http_port))?
+    .run()
+    .await
 }

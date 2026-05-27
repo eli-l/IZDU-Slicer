@@ -15,8 +15,8 @@ The "zero disk usage" name refers to the fact that all image processing happens 
 | Language | Rust | 2021 edition | Memory-safe, high-performance |
 | Web framework | actix-web | 4 | Async HTTP server |
 | Image processing | image | 0.24.6 | Load, decode, encode PNG |
-| Image operations | imageproc | 0.23.0 | Resize, pixel manipulation |
-| Font rendering | rusttype | 0.9.3 | Render watermark text to image |
+| Image operations | imageproc | 0.24 | Resize, pixel manipulation |
+| Font rendering | ab_glyph | (via imageproc) | Render watermark text to image |
 | HTTP client | reqwest | 0.11.18 | Download images from URLs |
 | Serialization | serde / serde_json | 1.0 | Parse JSON request payloads |
 | Async streams | futures | 0.3 | Stream response chunks |
@@ -53,7 +53,7 @@ IZDU-Slicer/
 
 The application entry point. Bootstraps an actix-web `HttpServer` that listens on port `9090` (configurable via `PORT` env var).
 
-Two endpoints are registered:
+Three endpoints are registered:
 
 #### `POST /slice`
 
@@ -77,7 +77,7 @@ or
 
 #### `POST /watermark`
 
-Placeholder endpoint (TODO). Returns a plain-text summary of query parameters. Not yet functional for actual watermark operations.
+Applies a text watermark to an image and returns the watermarked result as a single PNG. Same input sources as `/slice` (`image_url`, `image_base64`, or raw binary).
 
 ---
 
@@ -136,13 +136,13 @@ Handles all image loading and dispatch logic.
 ### `src/image_processor/watermark.rs` — Watermark Rendering
 
 **`create_watermark(text, size)`** — renders `text` to an RGBA image using the embedded OpenSans font:
-- Uses `rusttype` to rasterize glyphs
+- Uses `ab_glyph::FontRef` to rasterize glyphs to pixel positions
 - Returns a `DynamicImage` scaled to fill the full slice dimensions
-- The watermark image contains only white text on a black/transparent background
+- The watermark image contains white glyphs on a transparent background
 
 **`add_watermark(img, watermark, alpha)`** — alpha-blends the watermark onto each slice:
 - Positions watermark centered on the slice
-- Applies a blended alpha composite of watermark pixels over the image pixels
+- Applies per-pixel alpha composite of watermark pixels over the image pixels
 - `alpha` parameter controls overall opacity (blended with per-pixel alpha from the rendered text)
 
 ---

@@ -147,7 +147,7 @@ async fn download_image(url: String) -> Result<DynamicImage> {
         "Initial image size: {:.2} MB",
         size as f64 / 1024.0 / 1024.0
     );
-    image::load_from_memory(&img_bytes).map_err(|err| Error::new(err))
+    image::load_from_memory(&img_bytes).map_err(Error::new)
 }
 
 fn load_from_bytes(bytes: Vec<u8>) -> Result<DynamicImage> {
@@ -157,7 +157,7 @@ fn load_from_bytes(bytes: Vec<u8>) -> Result<DynamicImage> {
         "Image size: {:.2} MB",
         size as f64 / 1024.0 / 1024.0
     );
-    image::load_from_memory(&bytes).map_err(|err| Error::new(err))
+    image::load_from_memory(&bytes).map_err(Error::new)
 }
 
 fn load_from_base64(base64_str: String) -> Result<DynamicImage> {
@@ -173,5 +173,5 @@ fn load_from_base64(base64_str: String) -> Result<DynamicImage> {
         "Decoded image size: {:.2} MB",
         size as f64 / 1024.0 / 1024.0
     );
-    image::load_from_memory(&bytes).map_err(|err| Error::new(err))
+    image::load_from_memory(&bytes).map_err(Error::new)
 }

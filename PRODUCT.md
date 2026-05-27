@@ -36,9 +36,10 @@ This is useful anywhere an image needs to be tiled or distributed across multipl
 ### Watermarking
 
 - **Text watermark** — pass `?watermark=my_text` to stamp each slice with custom text
-- **Configurable opacity** — `?transparency=0` (opaque) to `?transparency=100` (invisible), default 30
+- **Configurable opacity** — `?transparency=0` (fully opaque) to `?transparency=100` (fully invisible), default 30
 - Uses the Open Sans font (bundled, SIL OFL license)
-- Watermark is rendered full-slice-size, centered
+- Watermark text is rendered at a fixed font size and scaled to fit the slice dimensions
+- Centered on each slice individually
 
 ### Streaming
 
@@ -114,7 +115,7 @@ Or send raw image bytes directly with any appropriate `Content-Type`.
 |-----------|------|---------|-------------|
 | `scale` | integer | 300 | Target size in px (0 = no scaling) |
 | `watermark` | string | — | Text to render as watermark |
-| `transparency` | integer | 30 | Watermark opacity 0–100 |
+| `transparency` | integer | 30 | Watermark opacity 0–100 (0=opaque, 100=invisible) |
 
 **Response:** `application/octet-stream` — stream of 4 raw PNG byte sequences.
 
@@ -132,7 +133,7 @@ Each slice is a complete, standalone PNG file. The last slice ends when the stre
 
 ### `POST /watermark`
 
-Placeholder endpoint. Currently returns a text summary of the query parameters without performing any image operation.
+Dedicated watermark endpoint. Applies text to the provided image and returns the watermarked result as `image/png`.
 
 **Query parameters:**
 
@@ -141,9 +142,9 @@ Placeholder endpoint. Currently returns a text summary of the query parameters w
 | `text` | string | "IZDU-Slicer" | Watermark text |
 | `transparency` | integer | 30 | Opacity 0–100 |
 
-**Response:** `text/plain` — parameter summary string.
+**Response:** `image/png` — watermarked PNG bytes.
 
-> ⚠️ This endpoint is not yet functional for actual watermark operations.
+Use `POST /slice?watermark=...` to watermark all four generated slices.
 
 ---
 
