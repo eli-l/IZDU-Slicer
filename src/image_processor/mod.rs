@@ -1,11 +1,11 @@
 pub mod image_slicer;
 pub mod watermark;
 
+pub use crate::image_processor::watermark::Watermark;
+use crate::ImagePayload;
 use actix_web::{web, HttpRequest};
 use anyhow::{Error, Result};
 use image::{DynamicImage, ImageBuffer, Rgba};
-use crate::ImagePayload;
-pub use crate::image_processor::watermark::Watermark;
 
 pub enum ImageSource {
     Url(String),
@@ -20,10 +20,7 @@ fn get_content_type(req: &HttpRequest) -> &str {
         .unwrap_or("")
 }
 
-pub async fn get_source(
-    req: HttpRequest,
-    body: web::Bytes,
-) -> Result<ImageSource> {
+pub async fn get_source(req: HttpRequest, body: web::Bytes) -> Result<ImageSource> {
     let content_type = get_content_type(&req);
 
     let source = if content_type.starts_with("application/json") {
@@ -57,7 +54,10 @@ pub async fn get_source(
 }
 
 #[allow(dead_code)]
-pub async fn slice(source: ImageSource, scale_px: u32) -> Result<[ImageBuffer<Rgba<u8>, Vec<u8>>; 4]> {
+pub async fn slice(
+    source: ImageSource,
+    scale_px: u32,
+) -> Result<[ImageBuffer<Rgba<u8>, Vec<u8>>; 4]> {
     let img = load_image(source).await?;
     let single_img_size = image_slicer::get_single_image_dimensions(&img);
     let sliced = image_slicer::slice_images_view(img, &single_img_size);
@@ -79,9 +79,13 @@ pub async fn slice_with_watermark_text(
     let single_img_size = image_slicer::get_single_image_dimensions(&img);
     let mut sliced = image_slicer::slice_images_view(img, &single_img_size);
 
-    let wm_image = watermark::create_watermark(watermark_text, (single_img_size.width, single_img_size.height));
+    let wm_image = watermark::create_watermark(
+        watermark_text,
+        (single_img_size.width, single_img_size.height),
+    );
     sliced.iter_mut().for_each(|slice_img| {
-        *slice_img = watermark::add_watermark(slice_img.clone(), &wm_image, transparency as f32 / 100.0);
+        *slice_img =
+            watermark::add_watermark(slice_img.clone(), &wm_image, transparency as f32 / 100.0);
     });
 
     if scale_px > 0 && scale_px < single_img_size.smallest {
@@ -102,7 +106,8 @@ pub async fn slice_with_watermark(
     let mut sliced = image_slicer::slice_images_view(img, &single_img_size);
 
     sliced.iter_mut().for_each(|slice_img| {
-        *slice_img = watermark::add_watermark(slice_img.clone(), &watermark, transparency as f32 / 100.0);
+        *slice_img =
+            watermark::add_watermark(slice_img.clone(), &watermark, transparency as f32 / 100.0);
     });
 
     if scale_px > 0 && scale_px < single_img_size.smallest {
@@ -119,7 +124,24 @@ pub async fn resize_image(
     aspect_ratio: &str,
 ) -> Result<DynamicImage> {
     let img = load_image(source).await?;
-    Ok(image_slicer::resize_single(img, width, height, aspect_ratio))
+    Ok(image_slicer::resize_single(
+        img,
+        width,
+        height,
+        aspect_ratio,
+    ))
+}
+
+#[allow(dead_code)]
+pub async fn crop_image(
+    source: ImageSource,
+    a: (u32, u32),
+    b: (u32, u32),
+    c: (u32, u32),
+    d: (u32, u32),
+) -> Result<DynamicImage> {
+    let img = load_image(source).await?;
+    image_slicer::crop_image(img, a, b, c, d).map_err(Error::msg)
 }
 
 pub async fn load_image(source: ImageSource) -> Result<DynamicImage> {
@@ -136,7 +158,8 @@ async fn download_image(url: String) -> Result<DynamicImage> {
     if !response.status().is_success() {
         return Err(Error::msg(format!(
             "Failed to download image: {}. Status: {}",
-            &url, response.status()
+            &url,
+            response.status()
         )));
     }
 
@@ -153,10 +176,7 @@ async fn download_image(url: String) -> Result<DynamicImage> {
 fn load_from_bytes(bytes: Vec<u8>) -> Result<DynamicImage> {
     println!("Loading image from binary data");
     let size = bytes.len() * std::mem::size_of::<u8>();
-    println!(
-        "Image size: {:.2} MB",
-        size as f64 / 1024.0 / 1024.0
-    );
+    println!("Image size: {:.2} MB", size as f64 / 1024.0 / 1024.0);
     image::load_from_memory(&bytes).map_err(Error::new)
 }
 

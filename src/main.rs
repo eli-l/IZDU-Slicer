@@ -38,6 +38,29 @@ struct ResizeQuery {
     aspect_ratio: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct CropQuery {
+    ax: Option<u32>,
+    ay: Option<u32>,
+    bx: Option<u32>,
+    by: Option<u32>,
+    cx: Option<u32>,
+    cy: Option<u32>,
+    dx: Option<u32>,
+    dy: Option<u32>,
+}
+
+fn crop_points_from_query(
+    query: &CropQuery,
+) -> Result<((u32, u32), (u32, u32), (u32, u32), (u32, u32)), &'static str> {
+    Ok((
+        (query.ax.ok_or("missing ax")?, query.ay.ok_or("missing ay")?),
+        (query.bx.ok_or("missing bx")?, query.by.ok_or("missing by")?),
+        (query.cx.ok_or("missing cx")?, query.cy.ok_or("missing cy")?),
+        (query.dx.ok_or("missing dx")?, query.dy.ok_or("missing dy")?),
+    ))
+}
+
 #[post("/slice")]
 async fn slice(req: HttpRequest, body: web::Bytes, query: web::Query<SliceQuery>) -> HttpResponse {
     let scale = query.scale.unwrap_or(300);
@@ -185,6 +208,49 @@ pub async fn resize_handler(
     HttpResponse::Ok().content_type("image/png").body(bytes)
 }
 
+#[post("/crop")]
+pub async fn crop_handler(
+    req: HttpRequest,
+    body: web::Bytes,
+    query: web::Query<CropQuery>,
+) -> HttpResponse {
+    let source = match get_source(req, body).await {
+        Ok(src) => src,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error getting image source: {}", e));
+        }
+    };
+
+    let (a, b, c, d) = match crop_points_from_query(&query) {
+        Ok(points) => points,
+        Err(e) => return HttpResponse::BadRequest().body(e),
+    };
+
+    let img = match image_processor::crop_image(source, a, b, c, d).await {
+        Ok(img) => img,
+        Err(e) => {
+            println!("Error: {}", e);
+            return HttpResponse::BadRequest().body(format!("Error cropping image: {}", e));
+        }
+    };
+
+    let mut buf = BufWriter::new(Cursor::new(Vec::new()));
+    if img.write_to(&mut buf, ImageFormat::Png).is_err() {
+        return HttpResponse::InternalServerError().body("Error encoding image");
+    }
+    let cursor = match BufWriter::into_inner(buf) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::InternalServerError().body("Error finalizing image");
+        }
+    };
+    let bytes = cursor.into_inner();
+
+    println!("Cropped image: {}x{}", img.width(), img.height());
+    HttpResponse::Ok().content_type("image/png").body(bytes)
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Running");
@@ -229,6 +295,7 @@ async fn main() -> std::io::Result<()> {
             .service(watermark)
             .service(slice)
             .service(resize_handler)
+            .service(crop_handler)
     })
     .bind(("0.0.0.0", http_port))?
     .run()

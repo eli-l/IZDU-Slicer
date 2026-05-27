@@ -1,11 +1,10 @@
 //! Integration tests for the IZDU-Slicer `/resize` endpoint.
 
-use actix_web::{test, http::header, dev::ServiceResponse};
+use actix_web::{dev::ServiceResponse, http::header, test};
 use bytes::Bytes;
 
-/// Helper to make a JSON image payload.
-fn image_url_payload(url: &str) -> serde_json::Value {
-    serde_json::json!({ "image_url": url })
+fn image_base64_payload() -> serde_json::Value {
+    serde_json::json!({ "image_base64": SMALL_PNG_BASE64 })
 }
 
 /// 4x4 blue PNG as base64.
@@ -13,14 +12,10 @@ const SMALL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAA
 
 /// Minimal 1x1 red PNG bytes.
 const TINY_PNG_BYTES: &[u8] = &[
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-    0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
-    0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+    0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82,
 ];
 
@@ -29,9 +24,7 @@ async fn resize_request(
     content_type: &str,
     query: Option<Vec<(&str, &str)>>,
 ) -> ServiceResponse {
-    let mut app = test::init_service(
-        actix_web::App::new().service(crate::resize_handler)
-    ).await;
+    let mut app = test::init_service(actix_web::App::new().service(crate::resize_handler)).await;
 
     let uri = match &query {
         Some(params) => {
@@ -44,6 +37,29 @@ async fn resize_request(
         }
         None => "/resize".to_string(),
     };
+
+    let req = test::TestRequest::post()
+        .uri(&uri)
+        .set_payload(body)
+        .insert_header((header::CONTENT_TYPE, content_type))
+        .to_request();
+
+    actix_web::test::call_service(&mut app, req).await
+}
+
+async fn crop_request(
+    body: impl Into<Bytes>,
+    content_type: &str,
+    query: Vec<(&str, &str)>,
+) -> ServiceResponse {
+    let mut app = test::init_service(actix_web::App::new().service(crate::crop_handler)).await;
+
+    let query_str = query
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
+    let uri = format!("/crop?{}", query_str);
 
     let req = test::TestRequest::post()
         .uri(&uri)
@@ -69,10 +85,7 @@ fn get_ct(resp: &ServiceResponse) -> String {
 /// Test 1: Resize with only width — image should be resized so width=target.
 #[tokio::test]
 async fn test_resize_width_only() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
     let resp = resize_request(payload, "application/json", Some(vec![("width", "100")])).await;
 
@@ -92,10 +105,7 @@ async fn test_resize_width_only() {
 /// Test 2: Resize with only height — image should be resized so height=target.
 #[tokio::test]
 async fn test_resize_height_only() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
     let resp = resize_request(payload, "application/json", Some(vec![("height", "100")])).await;
 
@@ -109,15 +119,16 @@ async fn test_resize_height_only() {
 /// Test 3: Resize with both width and height (preserve aspect) — fit within both bounds.
 #[tokio::test]
 async fn test_resize_width_and_height_preserve() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
     let resp = resize_request(
         payload,
         "application/json",
-        Some(vec![("width", "200"), ("height", "200"), ("aspect_ratio", "preserve")]),
+        Some(vec![
+            ("width", "200"),
+            ("height", "200"),
+            ("aspect_ratio", "preserve"),
+        ]),
     )
     .await;
 
@@ -131,15 +142,16 @@ async fn test_resize_width_and_height_preserve() {
 /// Test 4: Resize with both width and height (ignore aspect ratio) — exact dimensions.
 #[tokio::test]
 async fn test_resize_width_and_height_ignore() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
     let resp = resize_request(
         payload,
         "application/json",
-        Some(vec![("width", "150"), ("height", "100"), ("aspect_ratio", "ignore")]),
+        Some(vec![
+            ("width", "150"),
+            ("height", "100"),
+            ("aspect_ratio", "ignore"),
+        ]),
     )
     .await;
 
@@ -171,10 +183,7 @@ async fn test_resize_no_dimensions() {
 /// Test 6: Invalid aspect_ratio — should handle gracefully.
 #[tokio::test]
 async fn test_resize_invalid_aspect_ratio() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
     let resp = resize_request(
         payload,
@@ -269,17 +278,9 @@ async fn test_resize_base64_image() {
 /// Test 11: Width only, verify aspect ratio is preserved.
 #[tokio::test]
 async fn test_resize_width_preserves_aspect_ratio() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
-    .unwrap();
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
 
-    let resp = resize_request(
-        payload,
-        "application/json",
-        Some(vec![("width", "50")]),
-    )
-    .await;
+    let resp = resize_request(payload, "application/json", Some(vec![("width", "50")])).await;
 
     assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
 }
@@ -287,19 +288,97 @@ async fn test_resize_width_preserves_aspect_ratio() {
 /// Test 12: Height only, verify aspect ratio is preserved.
 #[tokio::test]
 async fn test_resize_height_preserves_aspect_ratio() {
-    let payload = serde_json::to_vec(&image_url_payload(
-        "https://httpbin.org/image/png",
-    ))
+    let payload = serde_json::to_vec(&image_base64_payload()).unwrap();
+
+    let resp = resize_request(payload, "application/json", Some(vec![("height", "50")])).await;
+
+    assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
+}
+
+#[tokio::test]
+async fn test_crop_valid_rectangle_returns_png() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
     .unwrap();
 
-    let resp = resize_request(
+    let resp = crop_request(
         payload,
         "application/json",
-        Some(vec![("height", "50")]),
+        vec![
+            ("ax", "1"),
+            ("ay", "1"),
+            ("bx", "3"),
+            ("by", "1"),
+            ("cx", "1"),
+            ("cy", "3"),
+            ("dx", "3"),
+            ("dy", "3"),
+        ],
     )
     .await;
 
     assert_eq!(resp.status().as_u16(), 200, "Expected 200 OK");
+    assert!(
+        get_ct(&resp).starts_with("image/png"),
+        "Expected image/png content-type"
+    );
+
+    let body = actix_web::test::read_body(resp).await;
+    let cropped = image::load_from_memory(&body).expect("crop response should be a PNG");
+    assert_eq!(cropped.dimensions(), (2, 2));
+}
+
+#[tokio::test]
+async fn test_crop_out_of_bounds_returns_400() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = crop_request(
+        payload,
+        "application/json",
+        vec![
+            ("ax", "0"),
+            ("ay", "0"),
+            ("bx", "5"),
+            ("by", "0"),
+            ("cx", "0"),
+            ("cy", "3"),
+            ("dx", "5"),
+            ("dy", "3"),
+        ],
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 400);
+}
+
+#[tokio::test]
+async fn test_crop_non_axis_aligned_returns_400() {
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "image_base64": SMALL_PNG_BASE64
+    }))
+    .unwrap();
+
+    let resp = crop_request(
+        payload,
+        "application/json",
+        vec![
+            ("ax", "0"),
+            ("ay", "0"),
+            ("bx", "3"),
+            ("by", "1"),
+            ("cx", "0"),
+            ("cy", "3"),
+            ("dx", "3"),
+            ("dy", "3"),
+        ],
+    )
+    .await;
+
+    assert_eq!(resp.status().as_u16(), 400);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,9 +427,7 @@ async fn slice_request(
     content_type: &str,
     query: Option<Vec<(&str, &str)>>,
 ) -> ServiceResponse {
-    let mut app = test::init_service(
-        actix_web::App::new().service(crate::slice)
-    ).await;
+    let mut app = test::init_service(actix_web::App::new().service(crate::slice)).await;
 
     let uri = match &query {
         Some(params) => {
@@ -473,8 +550,7 @@ async fn test_slice_watermark_transparency_100_invisible() {
         // Check that center is still blue (no watermark composited)
         let center = slice.get_pixel(cx, cy);
         assert_eq!(
-            *center,
-            BLUE_PIXEL,
+            *center, BLUE_PIXEL,
             "transparency=100: slice {} center should remain base blue (no overlay)",
             i
         );
@@ -536,8 +612,7 @@ async fn test_slice_without_watermark_unchanged() {
         let cy = slice.height() / 2;
         let center = slice.get_pixel(cx, cy);
         assert_eq!(
-            *center,
-            BLUE_PIXEL,
+            *center, BLUE_PIXEL,
             "no watermark: slice {} should remain base blue",
             i
         );

@@ -26,6 +26,7 @@ This is useful anywhere an image needs to be tiled or distributed across multipl
 - **Base64 input** — pass an image as a base64-encoded string
 - **Binary input** — send raw image bytes directly (no wrapping JSON)
 - **PNG output** — all slices encoded as PNG
+- **Rectangular cropping** — extract an axis-aligned region using 4 image-space points
 
 ### Resizing
 
@@ -45,6 +46,13 @@ This is useful anywhere an image needs to be tiled or distributed across multipl
 
 - Responses are streamed as chunks (not buffered in full)
 - Caller receives a continuous byte stream and splits it by locating PNG file signatures
+
+### Cropping
+
+- **4-point crop** — pass A, B, C, and D corner coordinates in image pixel space
+- **Top-left origin** — `x` increases left to right, `y` increases top to bottom
+- **Validation** — all points must be within image bounds, form an axis-aligned rectangle, and produce a non-empty crop area
+- **PNG output** — returns one cropped PNG image
 
 ---
 
@@ -78,6 +86,14 @@ Each of the 4 slices gets the same centered watermark, ensuring brand coverage a
 ### Use in CI/CD pipelines
 
 Call the `/slice` endpoint from a script to automate image tiling as part of an asset processing pipeline.
+
+### Extract a region of interest
+
+Crop a known rectangular area from an image without writing intermediate files:
+
+```
+/crop?ax=100&ay=50&bx=500&by=50&cx=100&cy=350&dx=500&dy=350
+```
 
 ---
 
@@ -148,11 +164,31 @@ Use `POST /slice?watermark=...` to watermark all four generated slices.
 
 ---
 
+### `POST /crop`
+
+Crop a rectangular region from an image and return it as `image/png`.
+
+Coordinates are in image pixel space with origin `(0,0)` at the top-left pixel:
+
+| Point | Query parameters | Meaning |
+|-------|------------------|---------|
+| A | `ax`, `ay` | Top-left corner |
+| B | `bx`, `by` | Top-right corner |
+| C | `cx`, `cy` | Bottom-left corner |
+| D | `dx`, `dy` | Bottom-right corner |
+
+The current implementation requires an axis-aligned rectangle: `A.x == C.x`, `A.y == B.y`, `B.x == D.x`, and `C.y == D.y`.
+
+**Response:** `image/png` — cropped PNG bytes.
+
+---
+
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `PORT` | `9090` | TCP port the server listens on |
+| `GRPC_PORT` | `50051` | TCP port for the gRPC API |
 
 **Running locally:**
 

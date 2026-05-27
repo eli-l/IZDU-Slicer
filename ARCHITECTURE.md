@@ -53,7 +53,7 @@ IZDU-Slicer/
 
 The application entry point. Bootstraps an actix-web `HttpServer` that listens on port `9090` (configurable via `PORT` env var).
 
-Three endpoints are registered:
+Four endpoints are registered:
 
 #### `POST /slice`
 
@@ -78,6 +78,17 @@ or
 #### `POST /watermark`
 
 Applies a text watermark to an image and returns the watermarked result as a single PNG. Same input sources as `/slice` (`image_url`, `image_base64`, or raw binary).
+
+#### `POST /crop`
+
+Crops an image using four points in image pixel coordinates, with origin at the top-left pixel. The current implementation requires the points to form an axis-aligned rectangle:
+
+- A (`ax`, `ay`) — top-left
+- B (`bx`, `by`) — top-right
+- C (`cx`, `cy`) — bottom-left
+- D (`dx`, `dy`) — bottom-right
+
+All points must be within the image bounds, and the resulting crop width and height must be greater than zero. The response is a single `image/png`.
 
 ---
 
@@ -108,6 +119,8 @@ Handles all image loading and dispatch logic.
 
 **`slice_with_watermark_text(source, scale_px, text, transparency)`** — same as above, but renders `text` as a watermark using `watermark::create_watermark()` and overlays it onto each slice before optional resizing.
 
+**`crop_image(source, a, b, c, d)`** — loads an image source, validates the four crop points, and returns a cropped `DynamicImage`.
+
 ---
 
 ### `src/image_processor/image_slicer.rs` — Core Slicing
@@ -130,6 +143,8 @@ Handles all image loading and dispatch logic.
 **`slice_images_copy_px(img, size)`** — legacy pixel-by-pixel copy implementation. Kept for reference; unused.
 
 **`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
+
+**`crop_image(img, a, b, c, d)`** — validates that all four points are in bounds, axis-aligned, and produce a non-empty crop rectangle, then returns `img.crop_imm(x, y, width, height)`.
 
 ---
 

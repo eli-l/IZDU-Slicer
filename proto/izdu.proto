@@ -12,6 +12,9 @@ service ImageProcessor {
   // Resize an image. Returns single PNG.
   rpc Resize(ResizeRequest) returns (ResizeResponse);
 
+  // Crop an image using 4 axis-aligned rectangle points. Returns single PNG.
+  rpc Crop(CropRequest) returns (CropResponse);
+
   // Bidirectional streaming: send multiple requests, receive results as they complete.
   // Each request carries its own ID so client can correlate.
   rpc ProcessBatch(stream BatchRequest) returns (stream BatchResponse);
@@ -38,6 +41,17 @@ message ResizeConfig {
   uint32 width = 1;
   uint32 height = 2;
   string aspect_ratio = 3; // "preserve" or "ignore"
+}
+
+message CropConfig {
+  uint32 ax = 1;  // top-left X
+  uint32 ay = 2;  // top-left Y
+  uint32 bx = 3;  // top-right X
+  uint32 by = 4;  // top-right Y
+  uint32 cx = 5;  // bottom-left X
+  uint32 cy = 6;  // bottom-left Y
+  uint32 dx = 7;  // bottom-right X
+  uint32 dy = 8;  // bottom-right Y
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +99,20 @@ message ResizeResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Crop
+// ---------------------------------------------------------------------------
+
+message CropRequest {
+  ImageSource source = 1;
+  CropConfig crop = 2;
+}
+
+message CropResponse {
+  bytes data = 1;         // PNG image bytes
+  string error = 2;
+}
+
+// ---------------------------------------------------------------------------
 // Batch
 // ---------------------------------------------------------------------------
 
@@ -98,6 +126,7 @@ message Operation {
     SliceOp slice = 1;
     WatermarkOp watermark = 2;
     ResizeOp resize = 3;
+    CropOp crop = 4;
   }
 }
 
@@ -117,6 +146,11 @@ message ResizeOp {
   ResizeConfig resize = 2;
 }
 
+message CropOp {
+  ImageSource source = 1;
+  CropConfig crop = 2;
+}
+
 message BatchResponse {
   string request_id = 1;
   string error = 2;
@@ -124,6 +158,7 @@ message BatchResponse {
     BatchSliceResult slice = 3;
     WatermarkResponse watermark = 4;
     ResizeResponse resize = 5;
+    CropResponse crop = 6;
   }
 }
 
