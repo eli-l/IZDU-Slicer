@@ -212,4 +212,4 @@ The demo image in the repository shows the expected input → 4-output mapping:
 
 - **License:** GPLv3
 - **Language:** Rust (2021 edition)
-- **Version:** 0.2.0
+- **Version:** 0.3.0 — see [changelog](https://github.com/eli-l/IZDU-Slicer/releases/tag/v0.3.0)
