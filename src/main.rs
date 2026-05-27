@@ -108,7 +108,8 @@ async fn watermark(
     };
 
     let text = query.text.trim();
-    let alpha = query.transparency.unwrap_or(30) as f32 / 100.0;
+    let transparency = query.transparency.unwrap_or(30).min(100);
+    let alpha = transparency as f32 / 100.0;
 
     let img = match image_processor::load_image(source).await {
         Ok(img) => img,
@@ -134,7 +135,7 @@ async fn watermark(
 
     println!(
         "Watermarked image: {}x{}, text: \"{}\", transparency: {}",
-        w, h, text, alpha
+        w, h, text, transparency
     );
     HttpResponse::Ok().content_type("image/png").body(bytes)
 }

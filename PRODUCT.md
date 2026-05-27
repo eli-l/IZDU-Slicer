@@ -133,7 +133,7 @@ Each slice is a complete, standalone PNG file. The last slice ends when the stre
 
 ### `POST /watermark`
 
-Dedicated watermark endpoint (future work). Currently returns a plain-text parameter summary — it does not produce watermarked images.
+Dedicated watermark endpoint. Applies text to the provided image and returns the watermarked result as `image/png`.
 
 **Query parameters:**
 
@@ -142,9 +142,9 @@ Dedicated watermark endpoint (future work). Currently returns a plain-text param
 | `text` | string | "IZDU-Slicer" | Watermark text |
 | `transparency` | integer | 30 | Opacity 0–100 |
 
-**Response:** `text/plain` — parameter summary string.
+**Response:** `image/png` — watermarked PNG bytes.
 
-> ⚠️ This endpoint is a placeholder. For watermarking, use `POST /slice?watermark=...` instead.
+Use `POST /slice?watermark=...` to watermark all four generated slices.
 
 ---
 

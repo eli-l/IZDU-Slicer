@@ -29,15 +29,17 @@ pub mod server {
     };
 
     // Convert proto ImageSource to our internal ImageSource
-    fn proto_to_image_source(src: Option<ProtoImageSource>) -> crate::image_processor::ImageSource {
+    fn proto_to_image_source(
+        src: Option<ProtoImageSource>,
+    ) -> Result<crate::image_processor::ImageSource, Status> {
         match src {
             Some(s) => match s.source {
-                Some(ProtoSource::Url(u)) => crate::image_processor::ImageSource::Url(u),
-                Some(ProtoSource::Data(d)) => crate::image_processor::ImageSource::Binary(d),
-                Some(ProtoSource::Base64(b)) => crate::image_processor::ImageSource::Base64(b),
-                None => crate::image_processor::ImageSource::Binary(vec![]),
+                Some(ProtoSource::Url(u)) => Ok(crate::image_processor::ImageSource::Url(u)),
+                Some(ProtoSource::Data(d)) => Ok(crate::image_processor::ImageSource::Binary(d)),
+                Some(ProtoSource::Base64(b)) => Ok(crate::image_processor::ImageSource::Base64(b)),
+                None => Err(Status::invalid_argument("missing image source")),
             },
-            None => crate::image_processor::ImageSource::Binary(vec![]),
+            None => Err(Status::invalid_argument("missing image source")),
         }
     }
 
@@ -48,9 +50,26 @@ pub mod server {
         Ok(Bytes::from(buf))
     }
 
-    fn decode_wm_config(wm: Option<ProtoWatermarkConfig>) -> (String, u32) {
+    fn decode_wm_config(wm: Option<ProtoWatermarkConfig>, default_text: &str) -> (String, u32) {
         wm.map(|w| (w.text, w.transparency))
-            .unwrap_or_else(|| ("IZDU-Slicer".to_string(), 30))
+            .unwrap_or_else(|| (default_text.to_string(), 30))
+    }
+
+    fn decode_resize_config(
+        resize: Option<super::ResizeConfig>,
+    ) -> (Option<u32>, Option<u32>, String) {
+        resize
+            .map(|r| {
+                let ar = if r.aspect_ratio.is_empty() {
+                    "preserve".to_string()
+                } else {
+                    r.aspect_ratio
+                };
+                let width = (r.width > 0).then_some(r.width);
+                let height = (r.height > 0).then_some(r.height);
+                (width, height, ar)
+            })
+            .unwrap_or((None, None, "preserve".to_string()))
     }
 
     pub struct GrpcServer;
@@ -73,14 +92,14 @@ pub mod server {
             request: Request<ProtoSliceRequest>,
         ) -> Result<Response<<Self as ImageProcessor>::SliceStream>, Status> {
             let req = request.into_inner();
-            let source = proto_to_image_source(req.source);
-            let scale = if req.scale == 0 { 300 } else { req.scale };
+            let source = proto_to_image_source(req.source)?;
+            let scale = req.scale;
 
             let img = image_processor::load_image(source)
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
 
-            let (wm_text, wm_alpha) = decode_wm_config(req.watermark);
+            let (wm_text, wm_alpha) = decode_wm_config(req.watermark, "");
             let dim = image_slicer::get_single_image_dimensions(&img);
 
             let mut sliced = if wm_text.is_empty() {
@@ -125,8 +144,8 @@ pub mod server {
             request: Request<ProtoWatermarkRequest>,
         ) -> Result<Response<ProtoWatermarkResponse>, Status> {
             let req = request.into_inner();
-            let source = proto_to_image_source(req.source);
-            let (text, alpha) = decode_wm_config(req.watermark);
+            let source = proto_to_image_source(req.source)?;
+            let (text, alpha) = decode_wm_config(req.watermark, "IZDU-Slicer");
 
             let img = image_processor::load_image(source)
                 .await
@@ -148,19 +167,8 @@ pub mod server {
             request: Request<ProtoResizeRequest>,
         ) -> Result<Response<ProtoResizeResponse>, Status> {
             let req = request.into_inner();
-            let source = proto_to_image_source(req.source);
-
-            let (width, height, ar) = req
-                .resize
-                .map(|r| {
-                    let ar = if r.aspect_ratio.is_empty() {
-                        "preserve".to_string()
-                    } else {
-                        r.aspect_ratio
-                    };
-                    (Some(r.width), Some(r.height), ar)
-                })
-                .unwrap_or((None, None, "preserve".to_string()));
+            let source = proto_to_image_source(req.source)?;
+            let (width, height, ar) = decode_resize_config(req.resize);
 
             if ar == "ignore" && (width.is_none() || height.is_none()) {
                 return Err(Status::invalid_argument(
@@ -201,135 +209,54 @@ pub mod server {
                     let rid = req.request_id.clone();
                     let resp: ProtoBatchResponse = match req.operation {
                         Some(operation) => match operation.op {
-                            Some(ProtoOp::Slice(s)) => {
-                                let source = proto_to_image_source(s.source);
-                                let scale = if s.scale == 0 { 300 } else { s.scale };
-                                let (wm_text, wm_alpha) = decode_wm_config(s.watermark);
-                                match image_processor::load_image(source).await {
-                                    Ok(img) => {
-                                        let dim = image_slicer::get_single_image_dimensions(&img);
-                                        let mut sliced = image_slicer::slice_images_view(img, &dim);
-                                        if !wm_text.is_empty() {
-                                            let wm = watermark::create_watermark(
-                                                &wm_text,
-                                                (dim.width, dim.height),
-                                            );
-                                            for slice_img in &mut sliced {
-                                                *slice_img = watermark::add_watermark(
-                                                    slice_img.clone(),
-                                                    &wm,
-                                                    wm_alpha as f32 / 100.0,
+                            Some(ProtoOp::Slice(s)) => match proto_to_image_source(s.source) {
+                                Ok(source) => {
+                                    let scale = s.scale;
+                                    let (wm_text, wm_alpha) = decode_wm_config(s.watermark, "");
+                                    match image_processor::load_image(source).await {
+                                        Ok(img) => {
+                                            let dim =
+                                                image_slicer::get_single_image_dimensions(&img);
+                                            let mut sliced =
+                                                image_slicer::slice_images_view(img, &dim);
+                                            if !wm_text.is_empty() {
+                                                let wm = watermark::create_watermark(
+                                                    &wm_text,
+                                                    (dim.width, dim.height),
                                                 );
+                                                for slice_img in &mut sliced {
+                                                    *slice_img = watermark::add_watermark(
+                                                        slice_img.clone(),
+                                                        &wm,
+                                                        wm_alpha as f32 / 100.0,
+                                                    );
+                                                }
                                             }
-                                        }
-                                        if scale > 0 && scale < dim.smallest {
-                                            sliced = image_slicer::resize(sliced, scale);
-                                        }
-                                        let slices: Vec<_> = sliced
-                                            .into_iter()
-                                            .enumerate()
-                                            .map(|(i, img)| ProtoSliceResponse {
-                                                index: i as u32,
-                                                data: encode_png(img)
-                                                    .map(|d| d.to_vec())
-                                                    .unwrap_or_default(),
-                                                error: String::new(),
-                                            })
-                                            .collect();
-                                        ProtoBatchResponse {
-                                            request_id: rid,
-                                            error: String::new(),
-                                            result: Some(ProtoBatchResult::Slice(
-                                                ProtoBatchSliceResult { slices },
-                                            )),
-                                        }
-                                    }
-                                    Err(e) => ProtoBatchResponse {
-                                        request_id: rid,
-                                        error: e.to_string(),
-                                        result: None,
-                                    },
-                                }
-                            }
-                            Some(ProtoOp::Watermark(wm_op)) => {
-                                let source = proto_to_image_source(wm_op.source);
-                                let (text, alpha) = decode_wm_config(wm_op.watermark);
-                                match image_processor::load_image(source).await {
-                                    Ok(img) => {
-                                        let (w, h) = (img.width(), img.height());
-                                        let wm = watermark::create_watermark(&text, (w, h));
-                                        let watermarked = watermark::add_watermark(
-                                            img.to_rgba8(),
-                                            &wm,
-                                            alpha as f32 / 100.0,
-                                        );
-                                        match encode_png(watermarked) {
-                                            Ok(data) => ProtoBatchResponse {
-                                                request_id: rid,
-                                                error: String::new(),
-                                                result: Some(ProtoBatchResult::Watermark(
-                                                    ProtoWatermarkResponse {
+                                            if scale > 0 && scale < dim.smallest {
+                                                sliced = image_slicer::resize(sliced, scale);
+                                            }
+                                            let slices: Vec<_> = sliced
+                                                .into_iter()
+                                                .enumerate()
+                                                .map(|(i, img)| match encode_png(img) {
+                                                    Ok(data) => ProtoSliceResponse {
+                                                        index: i as u32,
                                                         data: data.to_vec(),
                                                         error: String::new(),
                                                     },
-                                                )),
-                                            },
-                                            Err(e) => ProtoBatchResponse {
+                                                    Err(e) => ProtoSliceResponse {
+                                                        index: i as u32,
+                                                        data: vec![],
+                                                        error: e,
+                                                    },
+                                                })
+                                                .collect();
+                                            ProtoBatchResponse {
                                                 request_id: rid,
-                                                error: e,
-                                                result: None,
-                                            },
-                                        }
-                                    }
-                                    Err(e) => ProtoBatchResponse {
-                                        request_id: rid,
-                                        error: e.to_string(),
-                                        result: None,
-                                    },
-                                }
-                            }
-                            Some(ProtoOp::Resize(rs_op)) => {
-                                let source = proto_to_image_source(rs_op.source);
-                                let (width, height, ar) = rs_op
-                                    .resize
-                                    .map(|r| {
-                                        let ar = if r.aspect_ratio.is_empty() {
-                                            "preserve".to_string()
-                                        } else {
-                                            r.aspect_ratio
-                                        };
-                                        (Some(r.width), Some(r.height), ar)
-                                    })
-                                    .unwrap_or((None, None, "preserve".to_string()));
-                                if ar == "ignore" && (width.is_none() || height.is_none()) {
-                                    ProtoBatchResponse {
-                                        request_id: rid,
-                                        error: "aspect_ratio=ignore requires width and height"
-                                            .into(),
-                                        result: None,
-                                    }
-                                } else {
-                                    match image_processor::load_image(source).await {
-                                        Ok(img) => {
-                                            let resized = image_slicer::resize_single(
-                                                img, width, height, &ar,
-                                            );
-                                            match encode_png(resized.to_rgba8()) {
-                                                Ok(data) => ProtoBatchResponse {
-                                                    request_id: rid,
-                                                    error: String::new(),
-                                                    result: Some(ProtoBatchResult::Resize(
-                                                        ProtoResizeResponse {
-                                                            data: data.to_vec(),
-                                                            error: String::new(),
-                                                        },
-                                                    )),
-                                                },
-                                                Err(e) => ProtoBatchResponse {
-                                                    request_id: rid,
-                                                    error: e,
-                                                    result: None,
-                                                },
+                                                error: String::new(),
+                                                result: Some(ProtoBatchResult::Slice(
+                                                    ProtoBatchSliceResult { slices },
+                                                )),
                                             }
                                         }
                                         Err(e) => ProtoBatchResponse {
@@ -338,6 +265,109 @@ pub mod server {
                                             result: None,
                                         },
                                     }
+                                }
+                                Err(e) => ProtoBatchResponse {
+                                    request_id: rid,
+                                    error: e.message().to_string(),
+                                    result: None,
+                                },
+                            },
+                            Some(ProtoOp::Watermark(wm_op)) => {
+                                match proto_to_image_source(wm_op.source) {
+                                    Ok(source) => {
+                                        let (text, alpha) =
+                                            decode_wm_config(wm_op.watermark, "IZDU-Slicer");
+                                        match image_processor::load_image(source).await {
+                                            Ok(img) => {
+                                                let (w, h) = (img.width(), img.height());
+                                                let wm = watermark::create_watermark(&text, (w, h));
+                                                let watermarked = watermark::add_watermark(
+                                                    img.to_rgba8(),
+                                                    &wm,
+                                                    alpha as f32 / 100.0,
+                                                );
+                                                match encode_png(watermarked) {
+                                                    Ok(data) => ProtoBatchResponse {
+                                                        request_id: rid,
+                                                        error: String::new(),
+                                                        result: Some(ProtoBatchResult::Watermark(
+                                                            ProtoWatermarkResponse {
+                                                                data: data.to_vec(),
+                                                                error: String::new(),
+                                                            },
+                                                        )),
+                                                    },
+                                                    Err(e) => ProtoBatchResponse {
+                                                        request_id: rid,
+                                                        error: e,
+                                                        result: None,
+                                                    },
+                                                }
+                                            }
+                                            Err(e) => ProtoBatchResponse {
+                                                request_id: rid,
+                                                error: e.to_string(),
+                                                result: None,
+                                            },
+                                        }
+                                    }
+                                    Err(e) => ProtoBatchResponse {
+                                        request_id: rid,
+                                        error: e.message().to_string(),
+                                        result: None,
+                                    },
+                                }
+                            }
+                            Some(ProtoOp::Resize(rs_op)) => {
+                                match proto_to_image_source(rs_op.source) {
+                                    Ok(source) => {
+                                        let (width, height, ar) =
+                                            decode_resize_config(rs_op.resize);
+                                        if ar == "ignore" && (width.is_none() || height.is_none()) {
+                                            ProtoBatchResponse {
+                                                request_id: rid,
+                                                error:
+                                                    "aspect_ratio=ignore requires width and height"
+                                                        .into(),
+                                                result: None,
+                                            }
+                                        } else {
+                                            match image_processor::load_image(source).await {
+                                                Ok(img) => {
+                                                    let resized = image_slicer::resize_single(
+                                                        img, width, height, &ar,
+                                                    );
+                                                    match encode_png(resized.to_rgba8()) {
+                                                        Ok(data) => ProtoBatchResponse {
+                                                            request_id: rid,
+                                                            error: String::new(),
+                                                            result: Some(ProtoBatchResult::Resize(
+                                                                ProtoResizeResponse {
+                                                                    data: data.to_vec(),
+                                                                    error: String::new(),
+                                                                },
+                                                            )),
+                                                        },
+                                                        Err(e) => ProtoBatchResponse {
+                                                            request_id: rid,
+                                                            error: e,
+                                                            result: None,
+                                                        },
+                                                    }
+                                                }
+                                                Err(e) => ProtoBatchResponse {
+                                                    request_id: rid,
+                                                    error: e.to_string(),
+                                                    result: None,
+                                                },
+                                            }
+                                        }
+                                    }
+                                    Err(e) => ProtoBatchResponse {
+                                        request_id: rid,
+                                        error: e.message().to_string(),
+                                        result: None,
+                                    },
                                 }
                             }
                             None => ProtoBatchResponse {

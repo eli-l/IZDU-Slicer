@@ -69,7 +69,7 @@ or
 ```
 
 **Query parameters** (all optional):
-- `scale` — target size in pixels (0 = no scaling). Images larger than this will be downscaled to fit within `scale × scale`. Aspect ratio is preserved using `Lanczos3` filter.
+- `scale` — target size in pixels (0 = no scaling). Images larger than this will be downscaled to fit within `scale × scale`. Aspect ratio is preserved using `Nearest` filter.
 - `watermark` — text string to render as a watermark on each slice.
 - `transparency` — watermark opacity (0–100), defaults to 30.
 
@@ -129,7 +129,7 @@ Handles all image loading and dispatch logic.
 
 **`slice_images_copy_px(img, size)`** — legacy pixel-by-pixel copy implementation. Kept for reference; unused.
 
-**`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Lanczos3`.
+**`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
 
 ---
 

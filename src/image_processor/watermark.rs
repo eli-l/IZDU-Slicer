@@ -92,6 +92,7 @@ pub fn add_watermark(
     watermark: &Watermark,
     alpha: f32,
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let alpha = alpha.clamp(0.0, 1.0);
     let (w, h) = (watermark.width(), watermark.height());
     let (iw, ih) = (img.width(), img.height());
     let x = (iw.saturating_sub(w)) / 2;
