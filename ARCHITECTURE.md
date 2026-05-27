@@ -172,7 +172,7 @@ Handles all image loading and dispatch logic.
 
 **`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
 
-**`crop_image(img, a, b, c, d)`** — validates four crop points (bounds + axis-aligned + non-zero area), then calls `img.crop_imm(x, y, width, height)`.
+**`crop_image(img, a, b, c, d)`** — validates four crop points (ordering: `ax < bx`, `ay < cy`; bounds: `x < width`, `y < height`; axis-alignment; non-zero area), then calls `img.crop_imm(x, y, width, height)`. Coordinate contract is half-open intervals.
 
 ---
 
@@ -230,7 +230,7 @@ main.rs: slice() handler
 Client POST /crop
     │
     ▼
-main.rs: crop() handler
+main.rs: crop_handler()
     │
     ├─ get_source(req, body)          ──► ImageSource::{Url, Binary, Base64}
     │

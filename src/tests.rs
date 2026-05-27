@@ -1,4 +1,4 @@
-//! Integration tests for the IZDU-Slicer `/resize` endpoint.
+//! Integration tests for the IZDU-Slicer HTTP endpoints: /resize, /slice, /crop.
 
 use actix_web::{dev::ServiceResponse, http::header, test};
 use bytes::Bytes;

@@ -114,10 +114,16 @@ pub fn resize_single(
     }
 }
 
-/// Crop a region from a DynamicImage using 4 points (A, B, C, D).
-/// All coordinates in image pixel space, origin top-left (0,0).
+/// Crop a region from a DynamicImage using 4 corner points (A, B, C, D).
+/// Coordinates are in image pixel space, origin (0,0) at top-left.
 /// A = top-left, B = top-right, C = bottom-left, D = bottom-right.
-/// Returns cropped image or error if coordinates are invalid.
+///
+/// Coordinate contract (half-open intervals, per-pixel image space):
+/// - 0 ≤ x < image_width, 0 ≤ y < image_height
+/// - bx > ax (top-left X must be less than top-right X)
+/// - cy > ay (top-left Y must be less than bottom-left Y)
+/// - Output dimensions: width = bx - ax, height = cy - ay
+///
 pub fn crop_image(
     img: DynamicImage,
     a: (u32, u32),
@@ -151,15 +157,25 @@ fn validate_crop_points(
     let image_width = img.width();
     let image_height = img.height();
 
+    // Bounds: 0 ≤ x < image_width, 0 ≤ y < image_height
     for (name, (x, y)) in [("A", a), ("B", b), ("C", c), ("D", d)] {
-        if x > image_width || y > image_height {
+        if x >= image_width || y >= image_height {
             return Err(format!(
-                "point {} ({}, {}) is out of bounds for image {}x{}",
-                name, x, y, image_width, image_height
+                "point {} ({}, {}) is out of bounds for image {}x{} (valid range: 0 ≤ x < {}, 0 ≤ y < {})",
+                name, x, y, image_width, image_height, image_width, image_height
             ));
         }
     }
 
+    // Ordering: ax < bx (top-left X before top-right X) and ay < cy (top-left Y before bottom-left Y)
+    if a.0 >= b.0 || a.1 >= c.1 {
+        return Err(
+            "crop points must have A.x < B.x and A.y < C.y (top-left must be above-left of top-right)"
+                .to_string(),
+        );
+    }
+
+    // Axis alignment: A.x == C.x, A.y == B.y, B.x == D.x, C.y == D.y
     if a.0 != c.0 || a.1 != b.1 || b.0 != d.0 || c.1 != d.1 {
         return Err(
             "crop points must form an axis-aligned rectangle: A.x == C.x, A.y == B.y, B.x == D.x, C.y == D.y"

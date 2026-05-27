@@ -76,8 +76,16 @@ pub mod server {
     type CropPoints = ((u32, u32), (u32, u32), (u32, u32), (u32, u32));
 
     fn decode_crop_config(crop: Option<super::CropConfig>) -> Result<CropPoints, String> {
-        crop.map(|c| ((c.ax, c.ay), (c.bx, c.by), (c.cx, c.cy), (c.dx, c.dy)))
-            .ok_or_else(|| "missing crop config".to_string())
+        let c = crop.ok_or_else(|| "missing crop config".to_string())?;
+        let ax = c.ax.ok_or_else(|| "missing ax".to_string())?;
+        let ay = c.ay.ok_or_else(|| "missing ay".to_string())?;
+        let bx = c.bx.ok_or_else(|| "missing bx".to_string())?;
+        let by = c.by.ok_or_else(|| "missing by".to_string())?;
+        let cx = c.cx.ok_or_else(|| "missing cx".to_string())?;
+        let cy = c.cy.ok_or_else(|| "missing cy".to_string())?;
+        let dx = c.dx.ok_or_else(|| "missing dx".to_string())?;
+        let dy = c.dy.ok_or_else(|| "missing dy".to_string())?;
+        Ok(((ax, ay), (bx, by), (cx, cy), (dx, dy)))
     }
 
     pub struct GrpcServer;

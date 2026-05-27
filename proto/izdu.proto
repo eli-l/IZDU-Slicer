@@ -44,14 +44,14 @@ message ResizeConfig {
 }
 
 message CropConfig {
-  uint32 ax = 1;  // top-left X
-  uint32 ay = 2;  // top-left Y
-  uint32 bx = 3;  // top-right X
-  uint32 by = 4;  // top-right Y
-  uint32 cx = 5;  // bottom-left X
-  uint32 cy = 6;  // bottom-left Y
-  uint32 dx = 7;  // bottom-right X
-  uint32 dy = 8;  // bottom-right Y
+  optional uint32 ax = 1;  // top-left X
+  optional uint32 ay = 2;  // top-left Y
+  optional uint32 bx = 3;  // top-right X
+  optional uint32 by = 4;  // top-right Y
+  optional uint32 cx = 5;  // bottom-left X
+  optional uint32 cy = 6;  // bottom-left Y
+  optional uint32 dx = 7;  // bottom-right X
+  optional uint32 dy = 8;  // bottom-right Y
 }
 
 // ---------------------------------------------------------------------------

@@ -168,16 +168,16 @@ Use `POST /slice?watermark=...` to watermark all four generated slices.
 
 Crop a rectangular region from an image and return it as `image/png`.
 
-Coordinates are in image pixel space with origin `(0,0)` at the top-left pixel:
+Coordinates are in image pixel space with origin `(0,0)` at the top-left pixel. The rectangle uses half-open intervals: `0 ≤ x < image_width`, `0 ≤ y < image_height`. Coordinate ordering: `A.x < B.x` and `A.y < C.y`.
 
-| Point | Query parameters | Meaning |
-|-------|------------------|---------|
-| A | `ax`, `ay` | Top-left corner |
-| B | `bx`, `by` | Top-right corner |
-| C | `cx`, `cy` | Bottom-left corner |
-| D | `dx`, `dy` | Bottom-right corner |
+| Point | Params | Meaning | Valid range |
+|-------|--------|---------|-------------|
+| A | `ax`, `ay` | Top-left | `0 ≤ ax < image_width`, `0 ≤ ay < image_height` |
+| B | `bx`, `by` | Top-right | `ax < bx < image_width`, `0 ≤ by < image_height` |
+| C | `cx`, `cy` | Bottom-left | `0 ≤ cx < image_width`, `ay < cy < image_height` |
+| D | `dx`, `dy` | Bottom-right | `bx < dx < image_width`, `cy < dy < image_height` |
 
-The current implementation requires an axis-aligned rectangle: `A.x == C.x`, `A.y == B.y`, `B.x == D.x`, and `C.y == D.y`.
+Axis-aligned constraints: `A.x == C.x`, `A.y == B.y`, `B.x == D.x`, `C.y == D.y`.
 
 **Response:** `image/png` — cropped PNG bytes.
 
