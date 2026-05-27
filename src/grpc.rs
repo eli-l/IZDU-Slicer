@@ -21,7 +21,8 @@ pub mod server {
     use super::operation::Op as ProtoOp;
     use super::{
         BatchRequest as ProtoBatchRequest, BatchResponse as ProtoBatchResponse,
-        BatchSliceResult as ProtoBatchSliceResult, ImageSource as ProtoImageSource,
+        BatchSliceResult as ProtoBatchSliceResult, CropRequest as ProtoCropRequest,
+        CropResponse as ProtoCropResponse, ImageSource as ProtoImageSource,
         ResizeRequest as ProtoResizeRequest, ResizeResponse as ProtoResizeResponse,
         SliceRequest as ProtoSliceRequest, SliceResponse as ProtoSliceResponse,
         WatermarkConfig as ProtoWatermarkConfig, WatermarkRequest as ProtoWatermarkRequest,
@@ -70,6 +71,21 @@ pub mod server {
                 (width, height, ar)
             })
             .unwrap_or((None, None, "preserve".to_string()))
+    }
+
+    type CropPoints = ((u32, u32), (u32, u32), (u32, u32), (u32, u32));
+
+    fn decode_crop_config(crop: Option<super::CropConfig>) -> Result<CropPoints, String> {
+        let c = crop.ok_or_else(|| "missing crop config".to_string())?;
+        let ax = c.ax.ok_or_else(|| "missing ax".to_string())?;
+        let ay = c.ay.ok_or_else(|| "missing ay".to_string())?;
+        let bx = c.bx.ok_or_else(|| "missing bx".to_string())?;
+        let by = c.by.ok_or_else(|| "missing by".to_string())?;
+        let cx = c.cx.ok_or_else(|| "missing cx".to_string())?;
+        let cy = c.cy.ok_or_else(|| "missing cy".to_string())?;
+        let dx = c.dx.ok_or_else(|| "missing dx".to_string())?;
+        let dy = c.dy.ok_or_else(|| "missing dy".to_string())?;
+        Ok(((ax, ay), (bx, by), (cx, cy), (dx, dy)))
     }
 
     pub struct GrpcServer;
@@ -184,6 +200,28 @@ pub mod server {
             let data = encode_png(resized.to_rgba8()).map_err(Status::internal)?;
 
             Ok(Response::new(ProtoResizeResponse {
+                data: data.to_vec(),
+                error: String::new(),
+            }))
+        }
+
+        async fn crop(
+            &self,
+            request: Request<ProtoCropRequest>,
+        ) -> Result<Response<ProtoCropResponse>, Status> {
+            let req = request.into_inner();
+            let source = proto_to_image_source(req.source)?;
+            let (a, b, c, d) = decode_crop_config(req.crop).map_err(Status::invalid_argument)?;
+
+            let img = image_processor::load_image(source)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+
+            let cropped =
+                image_slicer::crop_image(img, a, b, c, d).map_err(Status::invalid_argument)?;
+            let data = encode_png(cropped.to_rgba8()).map_err(Status::internal)?;
+
+            Ok(Response::new(ProtoCropResponse {
                 data: data.to_vec(),
                 error: String::new(),
             }))
@@ -363,6 +401,63 @@ pub mod server {
                                             }
                                         }
                                     }
+                                    Err(e) => ProtoBatchResponse {
+                                        request_id: rid,
+                                        error: e.message().to_string(),
+                                        result: None,
+                                    },
+                                }
+                            }
+                            Some(ProtoOp::Crop(crop_op)) => {
+                                match proto_to_image_source(crop_op.source) {
+                                    Ok(source) => match decode_crop_config(crop_op.crop) {
+                                        Ok((a, b, c, d)) => {
+                                            match image_processor::load_image(source).await {
+                                                Ok(img) => {
+                                                    match image_slicer::crop_image(img, a, b, c, d)
+                                                    {
+                                                        Ok(cropped) => {
+                                                            match encode_png(cropped.to_rgba8()) {
+                                                                Ok(data) => ProtoBatchResponse {
+                                                                    request_id: rid,
+                                                                    error: String::new(),
+                                                                    result: Some(
+                                                                        ProtoBatchResult::Crop(
+                                                                            ProtoCropResponse {
+                                                                                data: data.to_vec(),
+                                                                                error: String::new(
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                                Err(e) => ProtoBatchResponse {
+                                                                    request_id: rid,
+                                                                    error: e,
+                                                                    result: None,
+                                                                },
+                                                            }
+                                                        }
+                                                        Err(e) => ProtoBatchResponse {
+                                                            request_id: rid,
+                                                            error: e,
+                                                            result: None,
+                                                        },
+                                                    }
+                                                }
+                                                Err(e) => ProtoBatchResponse {
+                                                    request_id: rid,
+                                                    error: e.to_string(),
+                                                    result: None,
+                                                },
+                                            }
+                                        }
+                                        Err(e) => ProtoBatchResponse {
+                                            request_id: rid,
+                                            error: e,
+                                            result: None,
+                                        },
+                                    },
                                     Err(e) => ProtoBatchResponse {
                                         request_id: rid,
                                         error: e.message().to_string(),

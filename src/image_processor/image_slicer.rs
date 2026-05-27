@@ -97,7 +97,9 @@ pub fn resize_single(
         (None, None, _) => img,
         (None, Some(_h), "ignore") => img, // caller must validate: ignore requires both dims
         (Some(_w), None, "ignore") => img, // caller must validate: ignore requires both dims
-        (Some(w), Some(h), "ignore") => img.resize_exact(w, h, image::imageops::FilterType::Triangle),
+        (Some(w), Some(h), "ignore") => {
+            img.resize_exact(w, h, image::imageops::FilterType::Triangle)
+        }
         (Some(w), Some(h), _) => img.resize(w, h, image::imageops::FilterType::Triangle),
         (Some(w), None, _) => {
             let ratio = w as f64 / img.width() as f64;
@@ -110,4 +112,77 @@ pub fn resize_single(
             img.resize(new_w, h, image::imageops::FilterType::Triangle)
         }
     }
+}
+
+/// Crop a region from a DynamicImage using 4 corner points (A, B, C, D).
+/// Coordinates are in image pixel space, origin (0,0) at top-left.
+/// A = top-left, B = top-right, C = bottom-left, D = bottom-right.
+///
+/// Coordinate contract (half-open intervals, per-pixel image space):
+/// - 0 ≤ x ≤ image_width, 0 ≤ y ≤ image_height
+/// - bx > ax (top-left X must be less than top-right X)
+/// - cy > ay (top-left Y must be less than bottom-left Y)
+/// - Output dimensions: width = bx - ax, height = cy - ay
+///
+pub fn crop_image(
+    img: DynamicImage,
+    a: (u32, u32),
+    b: (u32, u32),
+    c: (u32, u32),
+    d: (u32, u32),
+) -> Result<DynamicImage, String> {
+    validate_crop_points(&img, a, b, c, d)?;
+
+    let x = std::cmp::min(a.0, b.0);
+    let y = std::cmp::min(a.1, c.1);
+    let right = std::cmp::max(b.0, d.0);
+    let bottom = std::cmp::max(c.1, d.1);
+    let width = right - x;
+    let height = bottom - y;
+
+    if width == 0 || height == 0 {
+        return Err("crop area must have positive width and height".to_string());
+    }
+
+    Ok(img.crop_imm(x, y, width, height))
+}
+
+fn validate_crop_points(
+    img: &DynamicImage,
+    a: (u32, u32),
+    b: (u32, u32),
+    c: (u32, u32),
+    d: (u32, u32),
+) -> Result<(), String> {
+    let image_width = img.width();
+    let image_height = img.height();
+
+    // Bounds: 0 ≤ x ≤ image_width, 0 ≤ y ≤ image_height.
+    // Ordering below keeps left/top coordinates inside the image while allowing
+    // right/bottom edges to touch image_width/image_height.
+    for (name, (x, y)) in [("A", a), ("B", b), ("C", c), ("D", d)] {
+        if x > image_width || y > image_height {
+            return Err(format!(
+                "point {} ({}, {}) is out of bounds for image {}x{} (valid range: 0 ≤ x ≤ {}, 0 ≤ y ≤ {})",
+                name, x, y, image_width, image_height, image_width, image_height
+            ));
+        }
+    }
+
+    // Ordering: ax < bx (top-left X before top-right X) and ay < cy (top-left Y before bottom-left Y)
+    if a.0 >= b.0 || a.1 >= c.1 {
+        return Err(
+            "crop points must have A.x < B.x and A.y < C.y (A is above-left of C)".to_string(),
+        );
+    }
+
+    // Axis alignment: A.x == C.x, A.y == B.y, B.x == D.x, C.y == D.y
+    if a.0 != c.0 || a.1 != b.1 || b.0 != d.0 || c.1 != d.1 {
+        return Err(
+            "crop points must form an axis-aligned rectangle: A.x == C.x, A.y == B.y, B.x == D.x, C.y == D.y"
+                .to_string(),
+        );
+    }
+
+    Ok(())
 }

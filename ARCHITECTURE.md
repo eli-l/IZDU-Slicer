@@ -53,7 +53,7 @@ IZDU-Slicer/
 
 The application entry point. Bootstraps an actix-web `HttpServer` that listens on port `9090` (configurable via `PORT` env var).
 
-Three endpoints are registered:
+Four endpoints are registered:
 
 #### `POST /slice`
 
@@ -78,6 +78,45 @@ or
 #### `POST /watermark`
 
 Applies a text watermark to an image and returns the watermarked result as a single PNG. Same input sources as `/slice` (`image_url`, `image_base64`, or raw binary).
+
+#### `POST /crop`
+
+Crops an image using four corner points in image pixel space, origin `(0,0)` at top-left:
+
+| Point | Params | Role |
+|-------|--------|------|
+| A | `ax`, `ay` | Top-left |
+| B | `bx`, `by` | Top-right |
+| C | `cx`, `cy` | Bottom-left |
+| D | `dx`, `dy` | Bottom-right |
+
+**Validation:** all points must be in bounds, axis-aligned (`A.x==C.x`, `A.y==B.y`, `B.x==D.x`, `C.y==D.y`), and crop area must have `width>0`, `height>0`.
+
+Returns `image/png` on success, `400 Bad Request` on validation failure.
+
+---
+
+### gRPC API (`tonic` + `prost`)
+
+A gRPC server runs alongside HTTP on `GRPC_PORT` (default `50051`). Service: `ImageProcessor`.
+
+| RPC | Description |
+|-----|-------------|
+| `Slice` | Slice image → stream 4 PNG slices |
+| `Watermark` | Apply watermark → single PNG |
+| `Resize` | Resize image → single PNG |
+| `Crop` | Crop via 4-point config → single PNG |
+| `ProcessBatch` | Bidirectional stream: send `BatchRequest`s, receive `BatchResponse`s |
+
+**Key proto messages:**
+- `ImageSource` — oneof `{ url, data, base64 }`
+- `WatermarkConfig` — `{ text, transparency }`
+- `ResizeConfig` — `{ width, height, aspect_ratio }`
+- `CropConfig` — `{ ax, ay, bx, by, cx, cy, dx, dy }` (4 corner points)
+
+**Batch `Operation`:** oneof `SliceOp | WatermarkOp | ResizeOp | CropOp`, each with `request_id` for correlation.
+
+**Notes:** `scale=0` → no scaling (pass through). Missing `ImageSource` → `invalid_argument`. PNG encode failures are propagated in the response `error` field.
 
 ---
 
@@ -108,6 +147,8 @@ Handles all image loading and dispatch logic.
 
 **`slice_with_watermark_text(source, scale_px, text, transparency)`** — same as above, but renders `text` as a watermark using `watermark::create_watermark()` and overlays it onto each slice before optional resizing.
 
+**`crop_image(source, a, b, c, d)`** — loads an image source, validates the four crop points, and returns a cropped `DynamicImage`.
+
 ---
 
 ### `src/image_processor/image_slicer.rs` — Core Slicing
@@ -130,6 +171,8 @@ Handles all image loading and dispatch logic.
 **`slice_images_copy_px(img, size)`** — legacy pixel-by-pixel copy implementation. Kept for reference; unused.
 
 **`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
+
+**`crop_image(img, a, b, c, d)`** — validates four crop points (ordering: `ax < bx`, `ay < cy`; bounds: `x <= width`, `y <= height`; axis-alignment; non-zero area), then calls `img.crop_imm(x, y, width, height)`. Coordinate contract is half-open intervals.
 
 ---
 
@@ -181,7 +224,29 @@ main.rs: slice() handler
     splits into 4 images, and reassembles to original dimensions
 ```
 
----
+### Crop Data Flow
+
+```
+Client POST /crop
+    │
+    ▼
+main.rs: crop_handler()
+    │
+    ├─ get_source(req, body)          ──► ImageSource::{Url, Binary, Base64}
+    │
+    ├─ image_processor::crop_image(source, a, b, c, d)
+    │       │
+    │       ├─ load_image(source)              ──► DynamicImage
+    │       ├─ validate crop points            ──► bounds, axis-align
+    │       ├─ compute x, y, width, height     ──► non-zero area
+    │       └─ img.crop_imm(x, y, width, height) ──► DynamicImage
+    │
+    ├─ crop failure                    ──► 400 Bad Request
+    │
+    ├─ encode_png()                    ──► PNG bytes
+    │
+    └─ HttpResponse (image/png)
+```
 
 ## Response Streaming
 

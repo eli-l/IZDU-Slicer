@@ -26,6 +26,7 @@ This is useful anywhere an image needs to be tiled or distributed across multipl
 - **Base64 input** — pass an image as a base64-encoded string
 - **Binary input** — send raw image bytes directly (no wrapping JSON)
 - **PNG output** — all slices encoded as PNG
+- **Rectangular cropping** — extract an axis-aligned region using 4 image-space points
 
 ### Resizing
 
@@ -45,6 +46,13 @@ This is useful anywhere an image needs to be tiled or distributed across multipl
 
 - Responses are streamed as chunks (not buffered in full)
 - Caller receives a continuous byte stream and splits it by locating PNG file signatures
+
+### Cropping
+
+- **4-point crop** — pass A, B, C, and D corner coordinates in image pixel space
+- **Top-left origin** — `x` increases left to right, `y` increases top to bottom
+- **Validation** — all points must be within image bounds, form an axis-aligned rectangle, and produce a non-empty crop area
+- **PNG output** — returns one cropped PNG image
 
 ---
 
@@ -78,6 +86,14 @@ Each of the 4 slices gets the same centered watermark, ensuring brand coverage a
 ### Use in CI/CD pipelines
 
 Call the `/slice` endpoint from a script to automate image tiling as part of an asset processing pipeline.
+
+### Extract a region of interest
+
+Crop a known rectangular area from an image without writing intermediate files:
+
+```
+/crop?ax=100&ay=50&bx=500&by=50&cx=100&cy=350&dx=500&dy=350
+```
 
 ---
 
@@ -148,11 +164,31 @@ Use `POST /slice?watermark=...` to watermark all four generated slices.
 
 ---
 
+### `POST /crop`
+
+Crop a rectangular region from an image and return it as `image/png`.
+
+Coordinates are in image pixel space with origin `(0,0)` at the top-left pixel. The cropped rectangle uses half-open intervals `[A.x, B.x)` and `[A.y, C.y)`, so right and bottom edge coordinates may equal `image_width` and `image_height`. Coordinate ordering: `A.x < B.x` and `A.y < C.y`.
+
+| Point | Params | Meaning |
+|-------|--------|---------|
+| A | `ax`, `ay` | Top-left |
+| B | `bx`, `by` | Top-right |
+| C | `cx`, `cy` | Bottom-left |
+| D | `dx`, `dy` | Bottom-right |
+
+Axis-aligned constraints: `A.x == C.x`, `A.y == B.y`, `B.x == D.x`, `C.y == D.y`.
+
+**Response:** `image/png` — cropped PNG bytes.
+
+---
+
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `PORT` | `9090` | TCP port the server listens on |
+| `GRPC_PORT` | `50051` | TCP port for the gRPC API |
 
 **Running locally:**
 
@@ -176,4 +212,4 @@ The demo image in the repository shows the expected input → 4-output mapping:
 
 - **License:** GPLv3
 - **Language:** Rust (2021 edition)
-- **Version:** 0.2.0
+- **Version:** 0.3.0 — see [changelog](https://github.com/eli-l/IZDU-Slicer/releases/tag/v0.3.0)
