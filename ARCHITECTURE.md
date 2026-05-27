@@ -81,14 +81,42 @@ Applies a text watermark to an image and returns the watermarked result as a sin
 
 #### `POST /crop`
 
-Crops an image using four points in image pixel coordinates, with origin at the top-left pixel. The current implementation requires the points to form an axis-aligned rectangle:
+Crops an image using four corner points in image pixel space, origin `(0,0)` at top-left:
 
-- A (`ax`, `ay`) — top-left
-- B (`bx`, `by`) — top-right
-- C (`cx`, `cy`) — bottom-left
-- D (`dx`, `dy`) — bottom-right
+| Point | Params | Role |
+|-------|--------|------|
+| A | `ax`, `ay` | Top-left |
+| B | `bx`, `by` | Top-right |
+| C | `cx`, `cy` | Bottom-left |
+| D | `dx`, `dy` | Bottom-right |
 
-All points must be within the image bounds, and the resulting crop width and height must be greater than zero. The response is a single `image/png`.
+**Validation:** all points must be in bounds, axis-aligned (`A.x==C.x`, `A.y==B.y`, `B.x==D.x`, `C.y==D.y`), and crop area must have `width>0`, `height>0`.
+
+Returns `image/png` on success, `400 Bad Request` on validation failure.
+
+---
+
+### gRPC API (`tonic` + `prost`)
+
+A gRPC server runs alongside HTTP on `GRPC_PORT` (default `50051`). Service: `ImageProcessor`.
+
+| RPC | Description |
+|-----|-------------|
+| `Slice` | Slice image → stream 4 PNG slices |
+| `Watermark` | Apply watermark → single PNG |
+| `Resize` | Resize image → single PNG |
+| `Crop` | Crop via 4-point config → single PNG |
+| `ProcessBatch` | Bidirectional stream: send `BatchRequest`s, receive `BatchResponse`s |
+
+**Key proto messages:**
+- `ImageSource` — oneof `{ url, data, base64 }`
+- `WatermarkConfig` — `{ text, transparency }`
+- `ResizeConfig` — `{ width, height, aspect_ratio }`
+- `CropConfig` — `{ ax, ay, bx, by, cx, cy, dx, dy }` (4 corner points)
+
+**Batch `Operation`:** oneof `SliceOp | WatermarkOp | ResizeOp | CropOp`, each with `request_id` for correlation.
+
+**Notes:** `scale=0` → no scaling (pass through). Missing `ImageSource` → `invalid_argument`. PNG encode failures are propagated in the response `error` field.
 
 ---
 
@@ -144,7 +172,7 @@ Handles all image loading and dispatch logic.
 
 **`resize(images, size)`** — resizes all 4 image buffers to `size × size` using `FilterType::Nearest`.
 
-**`crop_image(img, a, b, c, d)`** — validates that all four points are in bounds, axis-aligned, and produce a non-empty crop rectangle, then returns `img.crop_imm(x, y, width, height)`.
+**`crop_image(img, a, b, c, d)`** — validates four crop points (bounds + axis-aligned + non-zero area), then calls `img.crop_imm(x, y, width, height)`.
 
 ---
 
@@ -196,7 +224,29 @@ main.rs: slice() handler
     splits into 4 images, and reassembles to original dimensions
 ```
 
----
+### Crop Data Flow
+
+```
+Client POST /crop
+    │
+    ▼
+main.rs: crop() handler
+    │
+    ├─ get_source(req, body)          ──► ImageSource::{Url, Binary, Base64}
+    │
+    ├─ load_image(source)              ──► DynamicImage
+    │
+    ├─ validate_crop_points(a, b, c, d) ──► bounds, axis-align, non-zero area
+    │       │
+    │       ├─ pass: compute x, y, width, height
+    │       └─ fail: return 400 Bad Request
+    │
+    ├─ img.crop_imm(x, y, width, height) ──► DynamicImage
+    │
+    ├─ encode_png()                    ──► PNG bytes
+    │
+    └─ HttpResponse (image/png)
+```
 
 ## Response Streaming
 
